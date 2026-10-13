@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" Name="Out-Switch" Language="1033" Version="0.5.0"
+           Manufacturer="HosseinSKR" UpgradeCode="54FC904C-64D4-42D8-913E-336555A3AD19">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Platform="x64"
+             Description="Out-Switch desktop, routing service and signed WinDivert component" />
+    <MajorUpgrade DowngradeErrorMessage="A newer Out-Switch version is already installed." Schedule="afterInstallInitialize" />
+    <MediaTemplate EmbedCab="yes" />
+    <Property Id="CURRENTWINDOWSBUILD"><RegistrySearch Id="ActualWindowsBuild" Root="HKLM" Key="SOFTWARE\Microsoft\Windows NT\CurrentVersion" Name="CurrentBuildNumber" Type="raw" Win64="yes" /></Property>
+    <Property Id="NATIVEARCH"><RegistrySearch Id="NativeArchitecture" Root="HKLM" Key="SYSTEM\CurrentControlSet\Control\Session Manager\Environment" Name="PROCESSOR_ARCHITECTURE" Type="raw" Win64="yes" /></Property>
+    <Condition Message="Out-Switch requires Windows 10 version 2004 or later on an Intel/AMD 64-bit PC."><![CDATA[Installed OR (VersionNT64 AND CURRENTWINDOWSBUILD >= 19041 AND NATIVEARCH = "AMD64")]]></Condition>
+    <Property Id="ARPCONTACT" Value="hosseinshakeri01@icloud.com" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/HosseinSKR" />
+    <Icon Id="OutSwitchIcon" SourceFile="$(var.SourceDir)\assets\OutSwitch.ico" />
+    <Property Id="ARPPRODUCTICON" Value="OutSwitchIcon" />
+    <Property Id="MSIRESTARTMANAGERCONTROL" Value="DisableShutdown" />
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="OutSwitch">
+          <Directory Id="LICENSEDIR" Name="licenses" />
+          <Component Id="DesktopApp" Guid="8EABFA50-E804-4F51-B98F-0F2816F9B90E" Win64="yes">
+            <File Id="DesktopExe" Source="$(var.PackageDir)\OutSwitch.exe" KeyPath="yes" />
+          </Component>
+          <Component Id="WinDivertLibrary" Guid="91F030D8-C48E-4F32-98DE-2B20F712F940" Win64="yes">
+            <File Id="WinDivertDll" Source="$(var.PackageDir)\WinDivert.dll" KeyPath="yes" />
+          </Component>
+          <Component Id="WinDivertDriver" Guid="A1787E2A-DF33-4F10-9C90-73544ACF17D2" Win64="yes">
+            <File Id="WinDivertSys" Source="$(var.PackageDir)\WinDivert64.sys" KeyPath="yes" />
+          </Component>
+          <Component Id="BackgroundService" Guid="60AD71F9-D21A-4D01-8AC7-CB3657BB8A9F" Win64="yes">
+            <File Id="ServiceExe" Source="$(var.PackageDir)\OutSwitchService.exe" KeyPath="yes" />
+            <ServiceInstall Id="InstallService" Name="OutSwitch" DisplayName="Out-Switch"
+                            Description="Local Out-Switch routing, bandwidth controls and network monitoring."
+                            Type="ownProcess" Start="auto" ErrorControl="normal" Account="LocalSystem" Vital="yes">
+              <ServiceDependency Id="BFE" />
+            </ServiceInstall>
+            <ServiceControl Id="ControlService" Name="OutSwitch" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+          </Component>
+          <Component Id="OwnerIdentity" Guid="C8128C91-2819-431B-A056-22CBEE6D57A9" Win64="yes">
+            <RegistryValue Root="HKLM" Key="Software\OutSwitch" Name="OwnerSid" Type="string" Value="[UserSID]" KeyPath="yes" />
+          </Component>
+          <Component Id="Readme" Guid="003898B1-BDB7-4440-943D-EE4D93255F48" Win64="yes">
+            <File Id="ReadmeFile" Source="$(var.PackageDir)\README.md" KeyPath="yes" />
+          </Component>
+          <Component Id="License" Guid="B729D08D-7AB0-426F-B1CC-4B02166F2B4F" Win64="yes">
+            <File Id="LicenseFile" Source="$(var.PackageDir)\LICENSE" KeyPath="yes" />
+          </Component>
+          <Component Id="ThirdPartyNotices" Guid="E4633C85-CEFA-4A91-8454-603EA9E31FCA" Win64="yes">
+            <File Id="NoticesFile" Source="$(var.PackageDir)\THIRD_PARTY_NOTICES.md" KeyPath="yes" />
+          </Component>
+        </Directory>
+      </Directory>
+      <Directory Id="CommonAppDataFolder">
+        <Directory Id="DATADIR" Name="OutSwitch">
+          <Component Id="PrivateDataDirectory" Guid="D6EBD76E-0B4F-4F29-BFD7-273311493C1A" Win64="yes" Permanent="yes">
+            <!-- MsiLockPermissionsEx does not expand MSI properties. The service
+                 owns the database; the desktop accesses it through authenticated IPC. -->
+            <CreateFolder><PermissionEx Sddl="D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" /></CreateFolder>
+          </Component>
+        </Directory>
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ProgramMenuDir" Name="Out-Switch">
+          <Component Id="StartMenuShortcut" Guid="5F5CCBB9-BEAA-4EB2-A1C3-333B8DCA163F" Win64="yes">
+            <Shortcut Id="OpenOutSwitch" Name="Out-Switch" Description="Open Out-Switch" Target="[#DesktopExe]" WorkingDirectory="INSTALLFOLDER" Icon="OutSwitchIcon" />
+            <RemoveFolder Id="RemoveStartMenuDir" On="uninstall" />
+            <RegistryValue Root="HKLM" Key="Software\OutSwitch" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+          </Component>
+        </Directory>
+      </Directory>
+    </Directory>
+    <Feature Id="MainFeature" Title="Out-Switch" Level="1">
+      <ComponentRef Id="DesktopApp" /><ComponentRef Id="BackgroundService" />
+      <ComponentRef Id="WinDivertLibrary" /><ComponentRef Id="WinDivertDriver" />
+      <ComponentRef Id="OwnerIdentity" /><ComponentRef Id="Readme" /><ComponentRef Id="License" />
+      <ComponentRef Id="ThirdPartyNotices" /><ComponentRef Id="PrivateDataDirectory" /><ComponentRef Id="StartMenuShortcut" />
+      <ComponentGroupRef Id="DependencyLicenses" />
+    </Feature>
+    <UIRef Id="WixUI_Minimal" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.SourceDir)\installer\Welcome.rtf" />
+  </Product>
+</Wix>

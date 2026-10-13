@@ -1,0 +1,7 @@
+WinDivert 2.2.2-A, Copyright (c) Basil and contributors.
+Distributed under the LGPL version 3 or later option, dynamically loaded.
+Official distribution: https://reqrypt.org/windivert.html
+The unmodified matching source and build scripts are in WinDivert-2.2.2-Source.zip.
+The DLL is separately replaceable. Out-Switch does not prohibit reverse engineering
+for debugging modifications to this library. Windows driver signing policy still applies.
+No GPL example program is linked into Out-Switch.

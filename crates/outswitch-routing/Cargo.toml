@@ -1,0 +1,11 @@
+[package]
+name = "outswitch-routing"
+version.workspace = true
+edition.workspace = true
+[dependencies]
+outswitch-common = { path = "../outswitch-common" }
+outswitch-core = { path = "../outswitch-core" }
+anyhow.workspace = true
+windows-sys.workspace = true
+socket2 = { version = "0.5", features = ["all"] }
+

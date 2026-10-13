@@ -1,0 +1,9 @@
+[package]
+name = "outswitch-monitor"
+version.workspace = true
+edition.workspace = true
+[dependencies]
+outswitch-common = { path = "../outswitch-common" }
+anyhow.workspace = true
+windows-sys.workspace = true
+

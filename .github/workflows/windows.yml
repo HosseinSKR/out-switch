@@ -1,0 +1,46 @@
+name: Windows checks and preview package
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 40
+    env:
+      RUSTFLAGS: -C target-feature=+crt-static
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Select pinned Rust toolchain
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal
+          rustup override set 1.99.0
+      - name: Test including Windows integration
+        run: cargo test --workspace --locked
+      - name: Build desktop and service
+        run: cargo build --workspace --release --locked
+      - name: Prepare package
+        shell: pwsh
+        run: |
+          Copy-Item target/release/OutSwitch.exe,target/release/OutSwitchService.exe .
+          ./scripts/Get-WinDivert.ps1
+          ./scripts/Get-Wix.ps1 -Destination "$env:RUNNER_TEMP/wix"
+          ./scripts/Build-Installer.ps1 -WixDirectory "$env:RUNNER_TEMP/wix"
+      - name: Install and uninstall preview on the disposable runner
+        shell: pwsh
+        run: ./scripts/Test-Installer.ps1 -MsiPath ./dist/Out-Switch-0.5.0-x64.msi
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: Out-Switch-preview-x64
+          path: |
+            dist/*.msi
+            dist/*test*.log
+          if-no-files-found: error
+    # This workflow creates build artifacts only. It never creates a GitHub release.
+

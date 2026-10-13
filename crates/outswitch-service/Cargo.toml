@@ -1,0 +1,20 @@
+[package]
+name = "outswitch-service"
+version.workspace = true
+edition.workspace = true
+[[bin]]
+name = "OutSwitchService"
+path = "src/main.rs"
+[dependencies]
+outswitch-common = { path = "../outswitch-common" }
+outswitch-core = { path = "../outswitch-core" }
+outswitch-network = { path = "../outswitch-network" }
+outswitch-monitor = { path = "../outswitch-monitor" }
+outswitch-storage = { path = "../outswitch-storage" }
+outswitch-routing = { path = "../outswitch-routing" }
+outswitch-ipc = { path = "../outswitch-ipc" }
+anyhow.workspace = true
+windows-service.workspace = true
+windows-sys.workspace = true
+serde_json.workspace = true
+

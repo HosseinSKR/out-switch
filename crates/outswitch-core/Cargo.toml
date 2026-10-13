@@ -1,0 +1,8 @@
+[package]
+name = "outswitch-core"
+version.workspace = true
+edition.workspace = true
+[dependencies]
+outswitch-common = { path = "../outswitch-common" }
+anyhow.workspace = true
+
