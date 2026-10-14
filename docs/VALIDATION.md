@@ -1,5 +1,13 @@
 # 0.6.0 validation — 14 October 2026
 
+Hosted Windows run [38512320804](https://github.com/HosseinSKR/out-switch/actions/runs/38512320804)
+passed all 34 tests, compilation, full MSI ICE validation, clean install, authenticated
+service IPC, forced service termination and automatic recovery with a new process,
+saved routing-on state, signed driver loading, and uninstall. This ran against code
+commit `e82aeaa64a1434dce96aa78e638bcc91090fe53c` with the MSVC toolchain.
+The download package uses the locally built GNU toolchain binaries, whose payloads
+and desktop behavior were checked locally. Live multi-adapter routing remains unverified.
+
 - 32 local tests passed. Two restricted Windows integration tests are deferred to hosted CI.
 - Real tray tests passed: hide/open, restored visibility, keyboard activation, exit from a hidden window.
 - Live GitHub update discovery and an MSI download passed, including streamed progress and SHA-256 verification.
