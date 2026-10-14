@@ -11,8 +11,8 @@
     <Condition Message="Out-Switch requires Windows 10 version 2004 or later on an Intel/AMD 64-bit PC."><![CDATA[Installed OR (VersionNT64 AND CURRENTWINDOWSBUILD >= 19041 AND NATIVEARCH = "AMD64")]]></Condition>
     <Property Id="ARPCONTACT" Value="hosseinshakeri01@icloud.com" />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/HosseinSKR" />
-    <Icon Id="OutSwitchIcon" SourceFile="$(var.SourceDir)\assets\OutSwitch.ico" />
-    <Property Id="ARPPRODUCTICON" Value="OutSwitchIcon" />
+    <Icon Id="OutSwitchIcon.exe" SourceFile="$(var.SourceDir)\assets\OutSwitch.ico" />
+    <Property Id="ARPPRODUCTICON" Value="OutSwitchIcon.exe" />
     <Property Id="MSIRESTARTMANAGERCONTROL" Value="DisableShutdown" />
     <Directory Id="TARGETDIR" Name="SourceDir">
       <Directory Id="ProgramFiles64Folder">
@@ -20,7 +20,7 @@
           <Directory Id="LICENSEDIR" Name="licenses" />
           <Component Id="DesktopApp" Guid="8EABFA50-E804-4F51-B98F-0F2816F9B90E" Win64="yes">
             <File Id="DesktopExe" Source="$(var.PackageDir)\OutSwitch.exe" KeyPath="yes">
-              <Shortcut Id="OpenOutSwitch" Directory="ProgramMenuDir" Name="Out-Switch" Advertise="yes" WorkingDirectory="INSTALLFOLDER" Icon="OutSwitchIcon" />
+              <Shortcut Id="OpenOutSwitch" Directory="ProgramMenuDir" Name="Out-Switch" Advertise="yes" WorkingDirectory="INSTALLFOLDER" Icon="OutSwitchIcon.exe" />
             </File>
             <RemoveFolder Id="RemoveStartMenuDir" Directory="ProgramMenuDir" On="uninstall" />
           </Component>
