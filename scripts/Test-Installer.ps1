@@ -19,6 +19,18 @@ try {
     if (!$reply.ok -or !$reply.snapshot.service_connected) { throw 'Service did not return a connected snapshot.' }
     if (!$reply.snapshot.config.routing_enabled) { throw 'Fresh installation did not enable Network Control.' }
     if (@($reply.snapshot.config.profiles.Normal).Count -ne 0) { throw 'A fresh installation must have no custom routes.' }
+    $before=Get-CimInstance Win32_Service -Filter "Name='OutSwitch'"
+    Stop-Process -Id $before.ProcessId -Force
+    $recovered=$false
+    for($attempt=0;$attempt -lt 25;$attempt++){
+        Start-Sleep -Seconds 1
+        $after=Get-CimInstance Win32_Service -Filter "Name='OutSwitch'"
+        if($after.State -eq 'Running' -and $after.ProcessId -ne $before.ProcessId){$recovered=$true;break}
+    }
+    if(!$recovered){throw 'Windows did not restart the forcibly ended service.'}
+    $reply=(& $exe --ipc-snapshot | ConvertFrom-Json)
+    if(!$reply.ok -or !$reply.snapshot.service_connected -or !$reply.snapshot.config.routing_enabled){throw 'Service did not restore IPC and saved settings after recovery.'}
+    Write-Host 'Forced service termination recovered with a new process and working IPC.'
     if (Get-Service OutSwitchDriver -ErrorAction SilentlyContinue) { throw 'The retired unsigned driver must not be installed.' }
     if(!(Test-Path -LiteralPath (Join-Path (Split-Path $exe) 'WinDivert64.sys'))){throw 'Signed driver payload is missing.'}
     & $exe --driver-check

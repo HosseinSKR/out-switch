@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
-  <Product Id="*" Name="Out-Switch" Language="1033" Version="0.5.0"
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi" xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
+  <Product Id="*" Name="Out-Switch" Language="1033" Version="0.6.0"
            Manufacturer="HosseinSKR" UpgradeCode="54FC904C-64D4-42D8-913E-336555A3AD19">
     <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Platform="x64"
              Description="Out-Switch desktop, routing service and signed WinDivert component" />
@@ -19,7 +19,10 @@
         <Directory Id="INSTALLFOLDER" Name="OutSwitch">
           <Directory Id="LICENSEDIR" Name="licenses" />
           <Component Id="DesktopApp" Guid="8EABFA50-E804-4F51-B98F-0F2816F9B90E" Win64="yes">
-            <File Id="DesktopExe" Source="$(var.PackageDir)\OutSwitch.exe" KeyPath="yes" />
+            <File Id="DesktopExe" Source="$(var.PackageDir)\OutSwitch.exe" KeyPath="yes">
+              <Shortcut Id="OpenOutSwitch" Directory="ProgramMenuDir" Name="Out-Switch" Advertise="yes" WorkingDirectory="INSTALLFOLDER" Icon="OutSwitchIcon" />
+            </File>
+            <RemoveFolder Id="RemoveStartMenuDir" Directory="ProgramMenuDir" On="uninstall" />
           </Component>
           <Component Id="WinDivertLibrary" Guid="91F030D8-C48E-4F32-98DE-2B20F712F940" Win64="yes">
             <File Id="WinDivertDll" Source="$(var.PackageDir)\WinDivert.dll" KeyPath="yes" />
@@ -33,6 +36,7 @@
                             Description="Local Out-Switch routing, bandwidth controls and network monitoring."
                             Type="ownProcess" Start="auto" ErrorControl="normal" Account="LocalSystem" Vital="yes">
               <ServiceDependency Id="BFE" />
+              <util:ServiceConfig FirstFailureActionType="restart" SecondFailureActionType="restart" ThirdFailureActionType="restart" ResetPeriodInDays="1" RestartServiceDelayInSeconds="5" />
             </ServiceInstall>
             <ServiceControl Id="ControlService" Name="OutSwitch" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
           </Component>
@@ -60,20 +64,14 @@
         </Directory>
       </Directory>
       <Directory Id="ProgramMenuFolder">
-        <Directory Id="ProgramMenuDir" Name="Out-Switch">
-          <Component Id="StartMenuShortcut" Guid="5F5CCBB9-BEAA-4EB2-A1C3-333B8DCA163F" Win64="yes">
-            <Shortcut Id="OpenOutSwitch" Name="Out-Switch" Description="Open Out-Switch" Target="[#DesktopExe]" WorkingDirectory="INSTALLFOLDER" Icon="OutSwitchIcon" />
-            <RemoveFolder Id="RemoveStartMenuDir" On="uninstall" />
-            <RegistryValue Root="HKLM" Key="Software\OutSwitch" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
-          </Component>
-        </Directory>
+        <Directory Id="ProgramMenuDir" Name="Out-Switch" />
       </Directory>
     </Directory>
     <Feature Id="MainFeature" Title="Out-Switch" Level="1">
       <ComponentRef Id="DesktopApp" /><ComponentRef Id="BackgroundService" />
       <ComponentRef Id="WinDivertLibrary" /><ComponentRef Id="WinDivertDriver" />
       <ComponentRef Id="OwnerIdentity" /><ComponentRef Id="Readme" /><ComponentRef Id="License" />
-      <ComponentRef Id="ThirdPartyNotices" /><ComponentRef Id="PrivateDataDirectory" /><ComponentRef Id="StartMenuShortcut" />
+      <ComponentRef Id="ThirdPartyNotices" /><ComponentRef Id="PrivateDataDirectory" />
       <ComponentGroupRef Id="DependencyLicenses" />
     </Feature>
     <UIRef Id="WixUI_Minimal" />

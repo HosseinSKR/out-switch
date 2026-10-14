@@ -196,6 +196,11 @@ fn service_main(_:Vec<std::ffi::OsString>){
 }
 fn main()->Result<()> {
     let args:Vec<_>=std::env::args().collect();
+    if args.iter().any(|a|a=="--start-service"){
+        let manager=windows_service::service_manager::ServiceManager::local_computer(None::<&str>,windows_service::service_manager::ServiceManagerAccess::CONNECT)?;
+        let service=manager.open_service("OutSwitch",ServiceAccess::QUERY_STATUS|ServiceAccess::START)?;
+        if service.query_status()?.current_state==ServiceState::Stopped{service.start::<&str>(&[])?;}return Ok(());
+    }
     if args.iter().any(|a|a=="--traffic-probe"){return routing_test::child();}
     if let Some(index)=args.iter().position(|a|a=="--routing-test"){return routing_test::run(args.get(index+1).context("Missing network ID")?);}
     if args.iter().any(|a|a=="--driver-check"){outswitch_routing::probe()?;println!("PASS: Windows loaded the bundled driver and opened/closed a filter that captures no traffic.");return Ok(());}

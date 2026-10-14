@@ -17,9 +17,9 @@ $build=Join-Path $output 'installer-build'
 New-Item -ItemType Directory -Force $build | Out-Null
 & "$wix\heat.exe" dir "$package\licenses" -nologo -ag -srd -scom -sreg -cg DependencyLicenses -dr LICENSEDIR -var var.LicenseDir -out "$build\licenses.wxs"
 if ($LASTEXITCODE -ne 0) { throw 'License harvesting failed' }
-& "$wix\candle.exe" -nologo -arch x64 "-dPackageDir=$package" "-dSourceDir=$source" "-dLicenseDir=$package\licenses" -out "$build\" "$source\installer\OutSwitch.wxs" "$build\licenses.wxs"
+& "$wix\candle.exe" -ext "$wix\WixUtilExtension.dll" -nologo -arch x64 "-dPackageDir=$package" "-dSourceDir=$source" "-dLicenseDir=$package\licenses" -out "$build\" "$source\installer\OutSwitch.wxs" "$build\licenses.wxs"
 if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed' }
-$arguments=@('-nologo','-sacl','-ext',"$wix\WixUIExtension.dll",'-out',"$output\Out-Switch-0.5.0-x64.msi","$build\OutSwitch.wixobj","$build\licenses.wixobj")
+$arguments=@('-ext',"$wix\WixUtilExtension.dll",'-nologo','-sacl','-ext',"$wix\WixUIExtension.dll",'-out',"$output\Out-Switch-0.6.0-x64.msi","$build\OutSwitch.wixobj","$build\licenses.wixobj")
 if ($SkipMsiValidation) { $arguments += '-sval' }
 $installerTemp=Join-Path $build 'temp'
 New-Item -ItemType Directory -Force $installerTemp | Out-Null
@@ -31,7 +31,7 @@ try {
 } finally {
     $env:TEMP=$previousTemp;$env:TMP=$previousTmp;$env:WIX_TEMP=$previousWixTemp
 }
-& "$PSScriptRoot\Test-InstallerPermissions.ps1" -MsiPath "$output\Out-Switch-0.5.0-x64.msi"
-Write-Host "Installer created: $output\Out-Switch-0.5.0-x64.msi"
+& "$PSScriptRoot\Test-InstallerPermissions.ps1" -MsiPath "$output\Out-Switch-0.6.0-x64.msi"
+Write-Host "Installer created: $output\Out-Switch-0.6.0-x64.msi"
 Write-Host 'Includes signed WinDivert. A successful package build does not prove installation or live routing compatibility.'
 

@@ -1,16 +1,14 @@
-# Out-Switch
+# Out-Switch 0.6.0 — Windows routing test build
 
-![Out-Switch icon](assets/OutSwitch.svg)
+<p><img src="assets/OutSwitch.png" width="96" alt="Out-Switch icon"></p>
 
-**Windows desktop app · version 0.5.0 preview**
+[Download the Windows installer](https://github.com/HosseinSKR/out-switch/releases/tag/v0.6.0)
 
-[Download the installer and complete ZIP](https://github.com/HosseinSKR/Out-Switch/releases/tag/v0.5.0)
-
-
-This update adds a persistent app library, dashboard pins, a scanned app picker with
-Browse, hideable ping tests, and traffic graph hover details. New installations start
-with Network Control ON; upgrades preserve your saved setting. It retains the 0.4.1
-installed-service identity fix, which the user confirmed connects successfully.
+This update fixes tray open/hide/exit, restores the tray after Explorer restarts,
+and installs automatic service recovery after a forced termination. It adds startup
+update checks, Settings/tray **Check for updates**, download progress, cancellation,
+SHA-256 verification and an explicit installer button. It keeps the app library,
+pins, inline ping tests and traffic hover details.
 
 Native desktop app by **HosseinSKR**. Assign an internet adapter to an executable,
 set shared upload/download limits, and monitor the relayed traffic locally.
@@ -22,7 +20,7 @@ It is a test build, not a certified finished release.** See [validation](docs/VA
 ## Install and use
 
 1. Close the old app using **Exit desktop app**, then extract the complete bundle.
-2. Open **Out-Switch-0.5.0-x64.msi** and approve Windows' installation prompt.
+2. Open **Out-Switch-0.6.0-x64.msi** and approve Windows' installation prompt.
 3. Open **Out-Switch** from Start. Review the connected adapters on Dashboard.
 4. Applications are scanned automatically on first desktop launch. Use **Add application**
    for a fresh scan or **Browse files**. **Pin to dashboard** keeps your favorites on Dashboard.
@@ -90,7 +88,7 @@ The driver preparation script downloads official archives, verifies pinned SHA-2
 hashes and Authenticode, and includes the matching library source and license.
 The retired custom driver under `driver/` and `legacy_wfp.rs` are historical source
 only; they are neither built nor installed. The prepared GitHub workflow creates
-test artifacts only. Release downloads are available on GitHub.
+test artifacts only. **Nothing has been published.**
 
 [Architecture](docs/ARCHITECTURE.md) · [Validation](docs/VALIDATION.md) · [Release checks](docs/RELEASE.md)
 

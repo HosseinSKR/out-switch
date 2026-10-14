@@ -1,3 +1,14 @@
+# 0.6.0 — 14 October 2026
+
+- Fix tray open/hide/exit, including hidden-window wake-up and keyboard activation.
+- Restore tray registration after Windows Explorer restarts; group menu actions and show service status.
+- Configure Windows to restart the service five seconds after unexpected termination.
+- Retry portable helper failures with backoff; keep the app library and settings while reconnecting.
+- Add an administrator-approved Start service button for an intentionally stopped installation.
+- Check GitHub on each launch; add manual update checks, download progress/cancel, SHA-256 verification and an explicit install button.
+- Clean up status details and settings cards while retaining the existing grid and dashboard.
+- Correct the MSI Start menu shortcut that failed hosted installer validation.
+
 # 0.5.0 — 13 October 2026
 
 - Network Control defaults ON for fresh settings; saved OFF and emergency stops remain OFF.

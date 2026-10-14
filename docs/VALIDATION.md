@@ -1,3 +1,15 @@
+# 0.6.0 validation — 14 October 2026
+
+- 32 local tests passed. Two restricted Windows integration tests are deferred to hosted CI.
+- Real tray tests passed: hide/open, restored visibility, keyboard activation, exit from a hidden window.
+- Live GitHub update discovery and an MSI download passed, including streamed progress and SHA-256 verification.
+- The Settings layout was captured and inspected; the release build excludes debug fixtures.
+- Hosted Windows CI runs all tests, MSI ICE validation, installation, driver smoke check, forced service termination/recovery, IPC reconnection and uninstall.
+- Live multi-adapter routing, upgrade/repair across all Windows versions, bandwidth accuracy and VPN/game compatibility still require testing. App and installer publisher signing remains pending.
+- The prior 0.5.0 hosted run passed all Rust tests and compilation but failed Start menu shortcut ICE checks; this version changes that shortcut to an advertised file shortcut.
+
+## Previous routing validation notes
+
 # 0.5.0 validation — 13 October 2026
 
 The user confirmed 0.4.1 reports Service connected after installation. This update retains

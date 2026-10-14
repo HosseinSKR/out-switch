@@ -34,7 +34,7 @@ jobs:
           ./scripts/Build-Installer.ps1 -WixDirectory "$env:RUNNER_TEMP/wix"
       - name: Install and uninstall preview on the disposable runner
         shell: pwsh
-        run: ./scripts/Test-Installer.ps1 -MsiPath ./dist/Out-Switch-0.5.0-x64.msi
+        run: ./scripts/Test-Installer.ps1 -MsiPath ./dist/Out-Switch-0.6.0-x64.msi
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: Out-Switch-preview-x64

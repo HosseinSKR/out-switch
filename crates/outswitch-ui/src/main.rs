@@ -1,5 +1,6 @@
 #![windows_subsystem = "windows"]
 mod tray;
+mod updater;
 mod icons;
 mod ping_panel;
 mod app_scan;
@@ -34,7 +35,7 @@ fn start_local_helper()->anyhow::Result<std::process::Child> {
         let code=windows_sys::Win32::Foundation::GetLastError();
         if !service.is_null(){CloseServiceHandle(service);}
         CloseServiceHandle(manager);
-        anyhow::ensure!(service.is_null()&&code==windows_sys::Win32::Foundation::ERROR_SERVICE_DOES_NOT_EXIST,"The installed Out-Switch service is stopped or unavailable. Start it in Windows Services, or repair the installation.");
+        anyhow::ensure!(service.is_null()&&code==windows_sys::Win32::Foundation::ERROR_SERVICE_DOES_NOT_EXIST,"Waiting for the installed service to recover. If it stays offline, use Settings > Start service or repair the installation.");
     }
     let helper=std::env::current_exe()?.with_file_name("OutSwitchService.exe");
     anyhow::ensure!(helper.is_file(),"OutSwitchService.exe is missing. Extract the full package or repair the installation.");
@@ -43,8 +44,16 @@ fn start_local_helper()->anyhow::Result<std::process::Child> {
         .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn()?;
     Ok(child)
 }
+fn start_installed_service()->anyhow::Result<()>{
+    use windows_sys::Win32::UI::{Shell::ShellExecuteW,WindowsAndMessaging::SW_HIDE};
+    let exe=std::env::current_exe()?.with_file_name("OutSwitchService.exe");
+    anyhow::ensure!(exe.is_file(),"Service application is missing. Repair the installation.");
+    let wide=|s:&str|s.encode_utf16().chain(Some(0)).collect::<Vec<_>>();
+    let result=unsafe{ShellExecuteW(std::ptr::null_mut(),wide("runas").as_ptr(),wide(&exe.to_string_lossy()).as_ptr(),wide("--start-service").as_ptr(),std::ptr::null(),SW_HIDE)};
+    anyhow::ensure!(result as isize>32,"Windows did not start the service. Approval may have been cancelled.");Ok(())
+}
 struct App {
-    icons:icons::Icons,pings:ping_panel::PingPanel,
+    updater:updater::Updater,icons:icons::Icons,pings:ping_panel::PingPanel,
     picker:app_picker::Picker,initial_scan:Option<Receiver<app_scan::ScanResult>>,initial_scan_started:bool,
     state:Snapshot,page:usize,search:String,filter:usize,tx:Sender<Request>,rx:Receiver<Update>,
     message:String,editor:Option<Rule>,new_profile:String,rename:BTreeMap<String,String>,
@@ -61,14 +70,17 @@ impl App {
         std::thread::spawn(move||{
             let mut manager=outswitch_network::NetworkManager::default();
             let mut helper_attempted=false;
+            let mut retry_at=std::time::Instant::now();let mut retry_delay=2u64;let mut last_config=Config::default();
             let mut owned_helper:Option<std::process::Child>=None;
             loop {
                 let req=match requests.recv_timeout(Duration::from_secs(2)){Ok(r)=>r,Err(mpsc::RecvTimeoutError::Timeout)=>Request::Snapshot,Err(_)=>break};
                 let is_snapshot=matches!(req,Request::Snapshot);
+                if owned_helper.as_mut().is_some_and(|c|c.try_wait().ok().flatten().is_some()){owned_helper=None;helper_attempted=false;}
                 match outswitch_ipc::request(&req){
-                    Ok(response)=>{if !response.message.is_empty(){let _=updates.send(Update::Message(response.message));}else if helper_attempted{let _=updates.send(Update::Message(String::new()));helper_attempted=false;}if let Some(s)=response.snapshot{let _=updates.send(Update::State(s));}},
+                    Ok(response)=>{if !response.message.is_empty(){let _=updates.send(Update::Message(response.message));}else if helper_attempted{let _=updates.send(Update::Message(String::new()));helper_attempted=false;}retry_delay=2;if let Some(s)=response.snapshot{last_config=s.config.clone();let _=updates.send(Update::State(s));}},
                     Err(e)=>{
-                        if allow_helper_start&&!helper_attempted&&e.downcast_ref::<std::io::Error>().and_then(|e|e.raw_os_error())==Some(2){
+                        if allow_helper_start&&owned_helper.is_none()&&std::time::Instant::now()>=retry_at&&matches!(e.downcast_ref::<std::io::Error>().and_then(|e|e.raw_os_error()),Some(2|109|231|233)){
+                            retry_at=std::time::Instant::now()+Duration::from_secs(retry_delay);retry_delay=(retry_delay*2).min(30);
                             helper_attempted=true;
                             match start_local_helper(){
                                 Ok(child)=>{owned_helper=Some(child);let _=updates.send(Update::Message("Starting the local Out-Switch helper…".into()));},
@@ -79,7 +91,7 @@ impl App {
                         match manager.snapshot(){Ok(mut networks)=>{
                             for (i,n) in networks.iter_mut().enumerate(){n.label=format!("Net {}",i+1);}
                             let (applications,monitor_error)=match outswitch_monitor::snapshot(&networks){Ok(apps)=>(apps,String::new()),Err(err)=>(vec![],format!(" Application scanner unavailable: {err}."))};
-                            let mut config=Config::default();config.routing_enabled=false;for n in &networks{config.network_names.insert(n.id.clone(),n.label.clone());}
+                            let mut config=last_config.clone();for n in &networks{config.network_names.insert(n.id.clone(),n.label.clone());}
                             let process_monitor_available=monitor_error.is_empty();
                             let _=updates.send(Update::State(Snapshot{networks,applications,config,process_monitor_available,engine_status:format!("Service offline. Read-only monitoring. {e}{monitor_error}"),timestamp:now(),..Default::default()}));
                         },Err(err)=>{let _=updates.send(Update::State(Snapshot{engine_status:format!("Service offline. Adapter scanner unavailable: {err}"),timestamp:now(),..Default::default()}));}}
@@ -91,7 +103,8 @@ impl App {
         });
         let (tray_tx,tray_rx)=mpsc::channel();tray::start(tray_tx,cc.egui_ctx.clone());
         let page=args.iter().position(|a|a=="--page").and_then(|i|args.get(i+1)).and_then(|name|PAGES.iter().position(|page|page.to_lowercase().replace(' ',"-")==*name)).unwrap_or(0);
-        let app=Self{icons:icons::Icons::new(cc.egui_ctx.clone()),pings:Default::default(),picker:Default::default(),initial_scan:None,initial_scan_started:false,state:Snapshot::default(),page,search:String::new(),filter:0,tx,rx,message:String::new(),editor:None,new_profile:String::new(),rename:BTreeMap::new(),history:BTreeMap::new(),last_stamp:0,graph_network:None,days:1,tray_rx,exit:false,reset_confirm:false,settings_draft:None,tray_available:false,screenshot,capture_requested:false,capture_page:page,started:std::time::Instant::now()};
+        let mut app=Self{updater:Default::default(),icons:icons::Icons::new(cc.egui_ctx.clone()),pings:Default::default(),picker:Default::default(),initial_scan:None,initial_scan_started:false,state:Snapshot::default(),page,search:String::new(),filter:0,tx,rx,message:String::new(),editor:None,new_profile:String::new(),rename:BTreeMap::new(),history:BTreeMap::new(),last_stamp:0,graph_network:None,days:1,tray_rx,exit:false,reset_confirm:false,settings_draft:None,tray_available:false,screenshot,capture_requested:false,capture_page:page,started:std::time::Instant::now()};
+        if allow_helper_start{app.updater.check(&cc.egui_ctx);}
         app.send(Request::Snapshot);app
     }
     fn send(&self,request:Request){let _=self.tx.send(request);}
@@ -241,19 +254,24 @@ impl App {
         ui.label("Local adapter usage collected while the service runs. Daily buckets use UTC. Application-level historical usage is not available in this build.");
     }
     fn settings(&mut self,ui:&mut egui::Ui){
+        self.card().show(ui,|ui|{ui.set_min_width(ui.available_width());self.updater.ui(ui);});ui.add_space(20.);
         let mut settings=self.settings_draft.clone().unwrap_or_else(||self.state.config.settings.clone());
-        self.card().show(ui,|ui|{
+        self.card().show(ui,|ui|{ui.set_min_width(ui.available_width());
             ui.label(RichText::new("Appearance & monitoring").size(20.));ui.add_space(12.);ui.checkbox(&mut settings.light,"Light theme");ui.horizontal(|ui|{ui.label("Accent");ui.color_edit_button_srgb(&mut settings.accent);});ui.checkbox(&mut settings.show_system,"Show Windows system applications");ui.checkbox(&mut settings.collect_statistics,"Collect local adapter usage statistics");
             ui.add_space(10.);if ui.add_enabled(self.state.service_connected,egui::Button::new("Save settings")).clicked(){self.send(Request::Settings(settings.clone()));self.settings_draft=None;}else{self.settings_draft=Some(settings.clone());}
         });ui.add_space(20.);
-        self.card().show(ui,|ui|{ui.label(RichText::new("Gaming QoS").size(20.));let mut gaming=self.state.config.gaming_mode;if ui.add_enabled(self.state.service_connected,egui::Checkbox::new(&mut gaming,"Use gaming priority markings")).changed(){self.send(Request::Gaming(gaming));}ui.label("Marks games as Critical, Discord as High, launchers as Low and OneDrive as Background. Applies to apps with a selected network; routes stay the same. Router support is required for prioritization.");});ui.add_space(20.);
-        self.card().show(ui,|ui|{ui.label(RichText::new("Privacy").size(20.));ui.label("Telemetry: OFF. No accounts or cloud services.");ui.label("The local relay forwards traffic without decrypting TLS or recording payloads.");ui.label("Ping tests send 10 ICMP probes to your selected Cloudflare, Google or Shecan target only when you press Test ping. Connection tests contact 1.1.1.1:443 on request. Results remain local.");});ui.add_space(20.);
-        self.card().show(ui,|ui|{
+        self.card().show(ui,|ui|{ui.set_min_width(ui.available_width());ui.label(RichText::new("Gaming QoS").size(20.));let mut gaming=self.state.config.gaming_mode;if ui.add_enabled(self.state.service_connected,egui::Checkbox::new(&mut gaming,"Use gaming priority markings")).changed(){self.send(Request::Gaming(gaming));}ui.label("Marks games as Critical, Discord as High, launchers as Low and OneDrive as Background. Applies to apps with a selected network; routes stay the same. Router support is required for prioritization.");});ui.add_space(20.);
+        self.card().show(ui,|ui|{ui.set_min_width(ui.available_width());ui.label(RichText::new("Privacy").size(20.));ui.label("Telemetry: OFF. No account required. Update checks contact GitHub at startup.");ui.label("The local relay forwards traffic without decrypting TLS or recording payloads.");ui.label("Ping tests send 10 ICMP probes to your selected Cloudflare, Google or Shecan target only when you press Test ping. Connection tests contact 1.1.1.1:443 on request. Results remain local.");});ui.add_space(20.);
+        self.card().show(ui,|ui|{ui.set_min_width(ui.available_width());
             ui.label(RichText::new("Contact & support").size(20.));
             ui.label("Get in touch with HosseinSKR, share feedback or support Out-Switch.");
             if ui.button("Contact Us").clicked(){self.page=8;}
         });ui.add_space(20.);
-        self.card().show(ui,|ui|{ui.label(RichText::new("Troubleshooting").size(20.));ui.label("Remove only this service's session filters. Existing bound connections may need to reconnect.");
+        self.card().show(ui,|ui|{ui.set_min_width(ui.available_width());ui.label(RichText::new("Troubleshooting").size(20.));
+            ui.label("Windows restarts the installed service after an unexpected exit. Saved rules return when it reconnects.");
+            if ui.add_enabled(!self.state.service_connected,egui::Button::new("Start service (administrator)")).clicked(){
+                self.message=match start_installed_service(){Ok(())=>"Approve the Windows prompt to start the service. Reconnecting automatically…".into(),Err(e)=>e.to_string()};
+            }ui.label("Remove only this service's session filters. Existing bound connections may need to reconnect.");
             if ui.add_enabled(self.state.service_connected,egui::Button::new("Check routing driver")).clicked(){self.send(Request::DriverCheck);}
             if ui.add(egui::Button::new("STOP ALL OUT-SWITCH ROUTING").fill(Color32::from_rgb(137,47,58))).clicked(){self.send(Request::EmergencyStop);}
             if ui.button("Reset saved network rules…").clicked(){self.reset_confirm=true;}
@@ -315,7 +333,8 @@ impl App {
 }
 impl eframe::App for App {
     fn update(&mut self,ctx:&egui::Context,_frame:&mut eframe::Frame){
-        self.pings.poll();
+        self.pings.poll();self.updater.poll();
+        if self.updater.exit{self.exit=true;ctx.send_viewport_cmd(egui::ViewportCommand::Close);}
         if self.screenshot.is_some(){self.page=self.capture_page;}
         if self.started.elapsed()<Duration::from_millis(500){diagnostic("Rendering application frame");}
         while let Ok(update)=self.rx.try_recv(){match update{Update::Message(m)=>self.message=m,Update::State(s)=>{
@@ -347,9 +366,9 @@ impl eframe::App for App {
             self.state.monitor_status.clear();
             if let Some(n)=self.state.networks.iter().find(|n|n.connected){self.pings.layout_example(&n.id);}
         }
-        while let Ok(action)=self.tray_rx.try_recv(){match action{tray::Action::Ready=>self.tray_available=true,tray::Action::Open=>{ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));ctx.send_viewport_cmd(egui::ViewportCommand::Focus);},tray::Action::Pause=>self.send(Request::EmergencyStop),tray::Action::Exit=>{self.exit=true;ctx.send_viewport_cmd(egui::ViewportCommand::Close);}}}
+        while let Ok(action)=self.tray_rx.try_recv(){match action{tray::Action::Ready=>self.tray_available=true,tray::Action::Open=>{ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));ctx.send_viewport_cmd(egui::ViewportCommand::Focus);},tray::Action::Hide=>ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false)),tray::Action::Updates=>{self.page=7;self.updater.check(ctx);},tray::Action::Pause=>self.send(Request::EmergencyStop),tray::Action::Exit=>{self.exit=true;ctx.send_viewport_cmd(egui::ViewportCommand::Close);}}}
         if self.tray_available&&self.screenshot.is_none()&&ctx.input(|i|i.viewport().close_requested())&&!self.exit{ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));}
-        if self.tray_available&&ctx.input(|i|i.viewport().minimized==Some(true)){ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));}
+        tray::status(self.state.service_connected,self.state.config.routing_enabled);
         if let Some(path)=self.screenshot.clone(){
             if !self.capture_requested&&self.started.elapsed()>Duration::from_secs(8){ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);self.capture_requested=true;}
             for event in ctx.input(|i|i.events.clone()){if let egui::Event::Screenshot{image,..}=event{let rgba:Vec<u8>=image.pixels.iter().flat_map(|c|c.to_array()).collect();let _=image::save_buffer(&path,&rgba,image.size[0] as u32,image.size[1] as u32,image::ColorType::Rgba8);self.exit=true;ctx.send_viewport_cmd(egui::ViewportCommand::Close);}}
@@ -364,7 +383,7 @@ impl eframe::App for App {
             egui::ScrollArea::vertical().id_salt("sidebar-navigation").max_height((ui.available_height()-100.).max(80.)).show(ui,|ui|{
                 for (i,page) in PAGES.iter().enumerate(){if ui.add_sized([165.,navigation_height],egui::SelectableLabel::new(self.page==i,*page)).clicked(){self.page=i;self.graph_network=None;}}
             });
-            ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT),|ui|{if ui.small_button("Exit desktop app").clicked(){self.exit=true;ctx.send_viewport_cmd(egui::ViewportCommand::Close);}ui.label(RichText::new(format!("v{VERSION} · development build")).small());ui.label(if self.state.service_connected{"● Service connected"}else{"○ Service offline"});ui.label(RichText::new("LOCAL ONLY").small().color(self.accent()));});
+            ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT),|ui|{if ui.small_button("Exit desktop app").clicked(){self.exit=true;ctx.send_viewport_cmd(egui::ViewportCommand::Close);}ui.label(RichText::new(format!("v{VERSION} · Preview")).small());ui.label(if self.state.service_connected{"● Service connected"}else{"○ Service offline"});ui.label(RichText::new("LOCAL ONLY").small().color(self.accent()));});
         });
         egui::TopBottomPanel::top("toolbar").frame(egui::Frame::none().inner_margin(egui::Margin::symmetric(26.,16.))).show(ctx,|ui|{ui.horizontal(|ui|{
             ui.label(RichText::new("NETWORK CONTROL").small().color(Color32::from_gray(140)));
@@ -381,7 +400,12 @@ impl eframe::App for App {
                 ui.set_min_width(ui.available_width());
                 Self::heading(ui,PAGES[self.page],match self.page{0=>"A clear view of your connections and the applications using them.",1=>"Choose a connection for each executable. Rules follow the path across restarts.",2=>"Live information from Windows network adapters.",3=>"Live bandwidth, measured locally.",4=>"Saved intentions and installed filters are shown separately.",5=>"Keep a different set of application routes for each activity.",6=>"Your usage history stays on this computer.",8=>"Questions, feedback and support for Out-Switch.",_=>"Appearance, local storage and recovery controls."});
                 if self.page!=8{
-                ui.colored_label(if self.state.config.routing_enabled{self.accent()}else{Color32::from_rgb(224,176,99)},&self.state.engine_status);ui.add_space(14.);
+                ui.horizontal_wrapped(|ui|{
+                    let (status,color)=if !self.state.service_connected{("Reconnecting to the service…",Color32::from_rgb(224,176,99))}else if !self.state.config.routing_enabled{("Network Control is off",Color32::from_rgb(224,176,99))}else if !self.state.routing_available{("Routing needs attention",Color32::from_rgb(224,176,99))}else{("Network Control is ready",self.accent())};
+                    ui.colored_label(color,status);
+                    if self.updater.available()&&ui.small_button("Update available").clicked(){self.page=7;}
+                });
+                egui::CollapsingHeader::new("Connection details").show(ui,|ui|{ui.label(&self.state.engine_status);});ui.add_space(14.);
                 if !self.state.monitor_status.is_empty(){ui.colored_label(Color32::from_rgb(224,176,99),&self.state.monitor_status);ui.add_space(14.);}
                 if self.initial_scan.is_some(){ui.horizontal(|ui|{ui.spinner();ui.label("First run: finding your apps…");});}
                 if !self.message.is_empty(){self.card().inner_margin(12.).show(ui,|ui|{ui.horizontal_wrapped(|ui|{ui.label(&self.message);if ui.small_button("Dismiss").clicked(){self.message.clear();}});});ui.add_space(14.);}
