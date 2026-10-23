@@ -1,14 +1,13 @@
-# Out-Switch 0.6.0 — Windows routing test build
+# Out-Switch 0.6.1 — Windows routing test build
 
 <p><img src="assets/OutSwitch.png" width="96" alt="Out-Switch icon"></p>
 
 [Download the Windows installer](https://github.com/HosseinSKR/out-switch/releases/tag/v0.6.0)
 
-This update fixes tray open/hide/exit, restores the tray after Explorer restarts,
-and installs automatic service recovery after a forced termination. It adds startup
-update checks, Settings/tray **Check for updates**, download progress, cancellation,
-SHA-256 verification and an explicit installer button. It keeps the app library,
-pins, inline ping tests and traffic hover details.
+This update fixes existing connections bypassing newly assigned routes and errors
+silently turning Network Control OFF. Steam's web helper follows Steam's selected
+network. Settings now separates appearance, monitoring and startup preferences.
+The last published release is linked above; 0.6.1 validation is in progress.
 
 Native desktop app by **HosseinSKR**. Assign an internet adapter to an executable,
 set shared upload/download limits, and monitor the relayed traffic locally.
@@ -20,15 +19,16 @@ It is a test build, not a certified finished release.** See [validation](docs/VA
 ## Install and use
 
 1. Close the old app using **Exit desktop app**, then extract the complete bundle.
-2. Open **Out-Switch-0.6.0-x64.msi** and approve Windows' installation prompt.
+2. Open **Out-Switch-0.6.1-x64.msi** and approve Windows' installation prompt.
 3. Open **Out-Switch** from Start. Review the connected adapters on Dashboard.
 4. Applications are scanned automatically on first desktop launch. Use **Add application**
    for a fresh scan or **Browse files**. **Pin to dashboard** keeps your favorites on Dashboard.
    **More → Remove from Out-Switch** removes the app and its rules from every profile,
    without uninstalling it. Removed apps stay removed until you add them again.
 5. Choose an app network and optionally set limits. Check **Network Control ON**, then
-   restart the selected app. Fresh installs start ON; upgrades keep your previous setting. Existing TCP sessions
-   opened before routing was enabled keep their original connection until restarted.
+   active connections reconnect on their next activity. Network Control starts ON when the
+   service starts (including upgrades); turn off this startup behavior in Settings if preferred.
+   Manual OFF lasts until the service restarts. Apps that do not reconnect automatically may need reopening.
 6. **Stop all routing** removes this app's capture handles and closes its relay sessions.
 
 Requires Windows 10 2004+ or Windows 11 **Intel/AMD x64**. ARM64 and 32-bit Windows
@@ -63,7 +63,8 @@ Failure is reported, never turned into a simulated pass. Test details are in
 Two-network isolation, live IPv6, sustained rate accuracy, games/anti-cheat, VPNs,
 sleep/resume, and MSI install/upgrade/repair/uninstall remain unverified.
 Raw fragments, IPsec, unknown/protected executable ownership, system-resolved DNS,
-local/broadcast/multicast traffic and existing TCP sessions are outside relay coverage.
+local/broadcast/multicast traffic are outside relay coverage. Existing TCP sessions belonging
+to assigned apps are reset so the app can reconnect through the relay.
 Shared UDP ports with ambiguous owners are rejected rather than guessed. Ordinary
 unclassified Windows traffic stays native. This is not a firewall or leak-prevention tool.
 Limits count application payload, not link-layer overhead. Per-app historical usage

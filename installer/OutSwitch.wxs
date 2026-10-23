@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi" xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
-  <Product Id="*" Name="Out-Switch" Language="1033" Version="0.6.0"
+  <Product Id="*" Name="Out-Switch" Language="1033" Version="0.6.1"
            Manufacturer="HosseinSKR" UpgradeCode="54FC904C-64D4-42D8-913E-336555A3AD19">
     <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Platform="x64"
              Description="Out-Switch desktop, routing service and signed WinDivert component" />

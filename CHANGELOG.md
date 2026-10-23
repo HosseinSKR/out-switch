@@ -1,3 +1,13 @@
+# 0.6.1 — 23 October 2026
+
+- Reset pre-existing TCP connections belonging to assigned apps so their next connections enter the selected-adapter relay.
+- Keep capture running after individual packet/endpoint errors; retry fatal routing failures without saving Network Control OFF.
+- Start with Network Control ON by default, including upgrades. Settings includes a startup opt-out; manual OFF applies until the service restarts.
+- Include Steam's CEF web helper in its routing rule, with explicit helper rules taking precedence. Steam games remain independent.
+- Display relay-confirmed adapters and actual per-app speeds. Preserve the last confirmed adapter between traffic bursts.
+- Redesign Appearance & monitoring with theme choices, accent presets, monitoring descriptions, startup controls and Apply/Discard actions.
+- Add regression coverage and a Windows CI live TCP reconnect/TCP+UDP relay check. Two-adapter isolation still requires local validation.
+
 # 0.6.0 — 14 October 2026
 
 - Fix tray open/hide/exit, including hidden-window wake-up and keyboard activation.

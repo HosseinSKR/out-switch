@@ -57,8 +57,14 @@ pub struct Application {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Event { pub time: u64, pub message: String }
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct Settings { pub light: bool, pub accent: [u8; 3], pub show_system: bool, pub collect_statistics: bool, #[serde(default)] pub welcome_done: bool }
+fn default_on()->bool{true}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Settings {
+    pub light: bool, pub accent: [u8; 3], pub show_system: bool, pub collect_statistics: bool,
+    #[serde(default)] pub welcome_done: bool,
+    #[serde(default="default_on")] pub network_control_on_start: bool,
+}
+impl Default for Settings{fn default()->Self{Self{light:false,accent:[63,179,235],show_system:false,collect_statistics:true,welcome_done:false,network_control_on_start:true}}}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SavedApplication { pub path: String, pub name: String }
 impl SavedApplication {
@@ -105,6 +111,7 @@ impl Config {
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Snapshot {
+    #[serde(default)] pub routing_recovering: bool,
     #[serde(default)] pub routing_available: bool,
     #[serde(default)] pub routing_unavailable_reason: String,
     pub networks: Vec<Network>, pub applications: Vec<Application>, pub config: Config,

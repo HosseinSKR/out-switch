@@ -194,11 +194,11 @@ impl App {
                     if network!=previous{let mut r=rule.clone().unwrap_or_else(||Rule::automatic(app.path.clone()));r.network=network;self.send(Request::SaveRule(r));}
                     ui.add_space(3.);ui.vertical(|ui|{
                         let observed=app.observed_networks.iter().map(|id|label(&self.state,id)).collect::<Vec<_>>().join(", ");
-                        let text=if observed.is_empty(){"TCP network: unknown".into()}else{format!("TCP network: {observed}")};
+                        let text=if app.uploaded.is_some(){if observed.is_empty(){"Relay: waiting for traffic".into()}else{format!("Relay: {observed}")}}else if observed.is_empty(){"TCP network: unknown".into()}else{format!("TCP network: {observed}")};
                         ui.add(egui::Label::new(&text).truncate()).on_hover_text(text);
                         let mismatch=rule.as_ref().and_then(|r|r.network.as_ref()).is_some_and(|id|app.observed_networks.iter().any(|o|o!=id));
                         if mismatch{ui.label(RichText::new("Route mismatch · reconnect").small().color(Color32::from_rgb(244,184,99)));}
-                        else{ui.label(RichText::new(if rule.as_ref().is_some_and(|r|r.network.is_some())&&!self.state.config.routing_enabled{"Saved · not enforced"}else{"Per-app speed: unavailable"}).small().color(Color32::from_gray(145)));}
+                        else{let detail=if rule.as_ref().is_some_and(|r|r.network.is_some())&&!self.state.config.routing_enabled{"Saved · not enforced".into()}else if let (Some(down),Some(up))=(app.download_bps,app.upload_bps){format!("↓ {}   ↑ {}",rate(down),rate(up))}else{"Per-app speed: unavailable".into()};ui.label(RichText::new(detail).small().color(Color32::from_gray(145)));}
                     });
                     ui.add_enabled_ui(self.state.service_connected&&self.state.config.apps_initialized,|ui|{ui.horizontal(|ui|{
                         let pinned=self.state.config.pinned_apps.contains(&identity(&app.path));
@@ -257,8 +257,30 @@ impl App {
         self.card().show(ui,|ui|{ui.set_min_width(ui.available_width());self.updater.ui(ui);});ui.add_space(20.);
         let mut settings=self.settings_draft.clone().unwrap_or_else(||self.state.config.settings.clone());
         self.card().show(ui,|ui|{ui.set_min_width(ui.available_width());
-            ui.label(RichText::new("Appearance & monitoring").size(20.));ui.add_space(12.);ui.checkbox(&mut settings.light,"Light theme");ui.horizontal(|ui|{ui.label("Accent");ui.color_edit_button_srgb(&mut settings.accent);});ui.checkbox(&mut settings.show_system,"Show Windows system applications");ui.checkbox(&mut settings.collect_statistics,"Collect local adapter usage statistics");
-            ui.add_space(10.);if ui.add_enabled(self.state.service_connected,egui::Button::new("Save settings")).clicked(){self.send(Request::Settings(settings.clone()));self.settings_draft=None;}else{self.settings_draft=Some(settings.clone());}
+            ui.label(RichText::new("Appearance & monitoring").size(20.).strong());
+            ui.label(RichText::new("Make Out-Switch feel at home on your desktop.").weak());ui.add_space(10.);
+            ui.strong("APPEARANCE");
+            ui.horizontal_wrapped(|ui|{ui.label("Theme");ui.selectable_value(&mut settings.light,false,"Dark");ui.selectable_value(&mut settings.light,true,"Light");});
+            ui.horizontal_wrapped(|ui|{ui.label("Accent color");
+                for (name,color) in [("Sky",[63,179,235]),("Mint",[65,199,159]),("Violet",[164,140,235]),("Amber",[232,175,77])]{
+                    if ui.selectable_label(settings.accent==color,RichText::new(name).color(Color32::from_rgb(color[0],color[1],color[2]))).clicked(){settings.accent=color;}
+                }ui.color_edit_button_srgb(&mut settings.accent);
+            });
+            ui.add_space(8.);ui.separator();ui.add_space(8.);ui.strong("MONITORING");
+            ui.checkbox(&mut settings.show_system,"Include Windows system apps");
+            ui.label(RichText::new("Show system processes alongside your apps in the application list.").small().weak());
+            ui.checkbox(&mut settings.collect_statistics,"Save network usage history");
+            ui.label(RichText::new("Keep up to 90 days of adapter totals on this PC. Live traffic stays available when off.").small().weak());
+            ui.add_space(8.);ui.separator();ui.add_space(8.);ui.strong("STARTUP");
+            ui.checkbox(&mut settings.network_control_on_start,"Start with Network Control ON");
+            ui.label(RichText::new("Apply saved routes when the background service starts. Temporary errors retry automatically.").small().weak());
+            ui.add_space(12.);let changed=settings!=self.state.config.settings;
+            ui.horizontal_wrapped(|ui|{
+                if ui.add_enabled(self.state.service_connected&&changed,egui::Button::new("Apply changes").min_size(Vec2::new(125.,32.))).clicked(){self.send(Request::Settings(settings.clone()));self.settings_draft=None;}
+                else{self.settings_draft=Some(settings.clone());}
+                if ui.add_enabled(changed,egui::Button::new("Discard").min_size(Vec2::new(80.,32.))).clicked(){self.settings_draft=None;}
+                ui.label(RichText::new(if changed{"Unsaved changes"}else{"All changes saved"}).small().weak());
+            });
         });ui.add_space(20.);
         self.card().show(ui,|ui|{ui.set_min_width(ui.available_width());ui.label(RichText::new("Gaming QoS").size(20.));let mut gaming=self.state.config.gaming_mode;if ui.add_enabled(self.state.service_connected,egui::Checkbox::new(&mut gaming,"Use gaming priority markings")).changed(){self.send(Request::Gaming(gaming));}ui.label("Marks games as Critical, Discord as High, launchers as Low and OneDrive as Background. Applies to apps with a selected network; routes stay the same. Router support is required for prioritization.");});ui.add_space(20.);
         self.card().show(ui,|ui|{ui.set_min_width(ui.available_width());ui.label(RichText::new("Privacy").size(20.));ui.label("Telemetry: OFF. No account required. Update checks contact GitHub at startup.");ui.label("The local relay forwards traffic without decrypting TLS or recording payloads.");ui.label("Ping tests send 10 ICMP probes to your selected Cloudflare, Google or Shecan target only when you press Test ping. Connection tests contact 1.1.1.1:443 on request. Results remain local.");});ui.add_space(20.);
@@ -325,7 +347,7 @@ impl App {
                 egui::ComboBox::from_id_salt("qos-priority").selected_text(format!("QoS: {:?}",rule.priority)).show_ui(ui,|ui|{for priority in Priority::all(){let title=format!("{priority:?}");ui.selectable_value(&mut rule.priority,priority,title);}});
             });
             ui.label("Limits are shared across this app's connections. QoS marks outgoing traffic; your router decides how to prioritize it.");
-            ui.colored_label(Color32::from_rgb(244,184,99),"Changing routes or limits reconnects relayed apps. Restart apps with existing connections. Fallback detects link changes; internet loss requires a connection test.");
+            ui.colored_label(Color32::from_rgb(244,184,99),"Changing routes or limits interrupts existing connections so apps can reconnect on the selected network. Fallback detects link changes; internet loss requires a connection test.");
             ui.add_space(12.);save=ui.add_enabled(self.state.service_connected,egui::Button::new("Save application rule")).clicked();
         });
         if save{self.send(Request::SaveRule(rule));}else if open{self.editor=Some(rule);}
@@ -401,7 +423,7 @@ impl eframe::App for App {
                 Self::heading(ui,PAGES[self.page],match self.page{0=>"A clear view of your connections and the applications using them.",1=>"Choose a connection for each executable. Rules follow the path across restarts.",2=>"Live information from Windows network adapters.",3=>"Live bandwidth, measured locally.",4=>"Saved intentions and installed filters are shown separately.",5=>"Keep a different set of application routes for each activity.",6=>"Your usage history stays on this computer.",8=>"Questions, feedback and support for Out-Switch.",_=>"Appearance, local storage and recovery controls."});
                 if self.page!=8{
                 ui.horizontal_wrapped(|ui|{
-                    let (status,color)=if !self.state.service_connected{("Reconnecting to the service…",Color32::from_rgb(224,176,99))}else if !self.state.config.routing_enabled{("Network Control is off",Color32::from_rgb(224,176,99))}else if !self.state.routing_available{("Routing needs attention",Color32::from_rgb(224,176,99))}else{("Network Control is ready",self.accent())};
+                    let (status,color)=if !self.state.service_connected{("Reconnecting to the service…",Color32::from_rgb(224,176,99))}else if !self.state.config.routing_enabled{("Network Control is off",Color32::from_rgb(224,176,99))}else if self.state.routing_recovering{("Routing is reconnecting…",Color32::from_rgb(224,176,99))}else if !self.state.routing_available{("Routing needs attention",Color32::from_rgb(224,176,99))}else{("Network Control is ready",self.accent())};
                     ui.colored_label(color,status);
                     if self.updater.available()&&ui.small_button("Update available").clicked(){self.page=7;}
                 });
@@ -409,7 +431,7 @@ impl eframe::App for App {
                 if !self.state.monitor_status.is_empty(){ui.colored_label(Color32::from_rgb(224,176,99),&self.state.monitor_status);ui.add_space(14.);}
                 if self.initial_scan.is_some(){ui.horizontal(|ui|{ui.spinner();ui.label("First run: finding your apps…");});}
                 if !self.message.is_empty(){self.card().inner_margin(12.).show(ui,|ui|{ui.horizontal_wrapped(|ui|{ui.label(&self.message);if ui.small_button("Dismiss").clicked(){self.message.clear();}});});ui.add_space(14.);}
-                if self.state.service_connected&&!self.state.config.settings.welcome_done{self.card().show(ui,|ui|{ui.label(RichText::new("Welcome to Out-Switch").size(24.));ui.label("Review your networks, choose a connection for each app, then restart that app. New installations start with Network Control ON. Pin favorites from Applications.");ui.label("The installer includes the signed networking component. This test build still needs live routing validation on your PC.");if ui.button("Continue with Automatic").clicked(){let mut settings=self.state.config.settings.clone();settings.welcome_done=true;self.send(Request::Settings(settings));}});ui.add_space(18.);}
+                if self.state.service_connected&&!self.state.config.settings.welcome_done{self.card().show(ui,|ui|{ui.label(RichText::new("Welcome to Out-Switch").size(24.));ui.label("Review your networks and choose a connection for each app. Active connections reconnect as traffic resumes. New installations start with Network Control ON. Pin favorites from Applications.");ui.label("The installer includes the signed networking component. This test build still needs live routing validation on your PC.");if ui.button("Continue with Automatic").clicked(){let mut settings=self.state.config.settings.clone();settings.welcome_done=true;self.send(Request::Settings(settings));}});ui.add_space(18.);}
                 }
                 match self.page{0=>{self.network_cards(ui,false);ui.add_space(26.);ui.horizontal(|ui|{ui.label(RichText::new("PINNED APPLICATIONS").strong());if ui.button("View all").clicked(){self.page=1;}});ui.add_space(12.);self.applications(ui,true);},1=>self.applications(ui,false),2=>self.network_cards(ui,true),3=>self.graph(ui),4=>self.rules(ui),5=>self.profiles(ui),6=>self.statistics(ui),8=>self.contact(ui),_=>self.settings(ui)}
                 if self.page==0&&!self.state.events.is_empty(){ui.add_space(20.);ui.label(RichText::new("RECENT EVENTS").strong());for e in self.state.events.iter().rev().take(4){ui.label(&e.message);}}

@@ -9,12 +9,13 @@ use windows_service::{define_windows_service,service::*,service_control_handler:
 
 struct Service {
     store:Store, state:Snapshot, engine:WindowsRoutingEngine,
-    networks:outswitch_network::NetworkManager, topology:String,
+    networks:outswitch_network::NetworkManager, topology:String, retry_at:Option<Instant>, retry_attempt:u32,
 }
 impl Service {
     fn new(path:PathBuf)->Result<Self>{
-        let store=Store::open(&path)?;let config=store.load()?;
-        Ok(Self{store,state:Snapshot{config,service_connected:true,engine_status:"Routing paused — Windows chooses connections".into(),..Default::default()},engine:WindowsRoutingEngine::default(),networks:Default::default(),topology:String::new()})
+        let store=Store::open(&path)?;let mut config=store.load()?;
+        if config.settings.network_control_on_start{config.routing_enabled=true;store.save(&config)?;}
+        Ok(Self{store,state:Snapshot{config,service_connected:true,engine_status:"Routing paused — Windows chooses connections".into(),..Default::default()},engine:WindowsRoutingEngine::default(),networks:Default::default(),topology:String::new(),retry_at:None,retry_attempt:0})
     }
     fn event(&mut self,message:String){
         if self.state.events.last().is_some_and(|e|e.message==message){return;}
@@ -24,12 +25,23 @@ impl Service {
         if self.state.config.routing_enabled {
             let rules:Vec<_>=self.state.config.rules().iter().map(|r|{let mut r=r.clone();if r.network.is_some(){r.priority=outswitch_core::effective_priority(&r,self.state.config.gaming_mode);}r}).collect();
             self.engine.apply(&rules,&self.state.networks)?;
-            self.state.rule_status=self.engine.statuses.clone();self.state.engine_status="Routing enabled — reconnect apps after changing rules; relay byte counts appear as traffic passes".into();
+            self.state.rule_status=self.engine.statuses.clone();self.state.engine_status="Network Control ON — assigned apps reconnect through their selected network".into();
         } else {self.engine.clear()?;self.state.rule_status.clear();self.state.engine_status=if self.state.routing_available{"Routing paused — Windows chooses connections".into()}else{self.state.routing_unavailable_reason.clone()};}
+        self.retry_at=None;self.retry_attempt=0;self.state.routing_recovering=false;
         Ok(())
     }
+    fn recover_routing(&mut self,error:impl std::fmt::Display)->Result<()> {
+        self.engine.clear()?;self.state.rule_status.clear();
+        // Runtime health is separate from the user's saved ON/OFF choice.
+        let delay=2u64.saturating_pow(self.retry_attempt.min(4)+1).min(30);
+        self.retry_attempt=self.retry_attempt.saturating_add(1);
+        self.retry_at=Some(Instant::now()+Duration::from_secs(delay));
+        self.state.routing_recovering=self.state.config.routing_enabled;
+        self.state.engine_status=format!("Routing recovering — retry in {delay}s: {error}");
+        self.event(self.state.engine_status.clone());Ok(())
+    }
     fn refresh(&mut self)->Result<()> {
-        if let Some(error)=self.engine.failure(){self.engine.clear()?;self.state.config.routing_enabled=false;self.store.save(&self.state.config)?;self.state.engine_status=format!("Routing stopped: {error}");self.state.rule_status.clear();self.event(self.state.engine_status.clone());}
+        if let Some(error)=self.engine.failure(){self.recover_routing(error)?;}
         if let Some(message)=self.engine.notice(){self.event(message);}
         let reason=outswitch_routing::availability_error().unwrap_or_default();
         let readiness_changed=self.state.routing_available!=reason.is_empty() || self.state.routing_unavailable_reason!=reason;
@@ -56,11 +68,11 @@ impl Service {
         self.state.networks=networks;
         self.update_applications(outswitch_monitor::snapshot(&self.state.networks));
         self.engine.measurements(&mut self.state.applications);
-        if topology!=self.topology || readiness_changed {
+        if topology!=self.topology || readiness_changed || (self.state.config.routing_enabled&&self.retry_at.is_some_and(|at|Instant::now()>=at)) {
             self.topology=topology;
             if let Err(e)=self.reconcile(){
                 // On adapter-change failures remove potentially stale source-address policies.
-                self.engine.clear()?;self.state.rule_status.clear();self.state.config.routing_enabled=false;self.store.save(&self.state.config)?;self.state.engine_status=e.to_string();self.event(e.to_string());
+                self.recover_routing(e)?;
             }
         }
         self.state.statistics=self.store.usage()?;self.state.timestamp=now();Ok(())
@@ -94,6 +106,7 @@ impl Service {
         if matches!(request,Request::DriverCheck){outswitch_routing::probe()?;return Ok("Windows loaded the signed routing component successfully. This check captures no traffic; test app routing separately.".into());}
         if matches!(request,Request::EmergencyStop|Request::ResetRules){
             self.engine.clear()?;self.state.rule_status.clear();self.state.config.routing_enabled=false;
+            self.retry_at=None;self.retry_attempt=0;self.state.routing_recovering=false;
             if matches!(request,Request::ResetRules){for rules in self.state.config.profiles.values_mut(){rules.clear();}}
             self.state.engine_status="All Out-Switch filters removed — Windows networking restored for new connections".into();
             self.store.save(&self.state.config)?;return Ok(self.state.engine_status.clone());
@@ -103,6 +116,7 @@ impl Service {
             let result=outswitch_network::test(&n);let current=self.state.networks.iter_mut().find(|n|n.id==id).unwrap();
             match result {Ok(ms)=>{current.internet=Some(true);current.ping_ms=Some(ms);return Ok(format!("{}: TCP connection to 1.1.1.1:443 succeeded in {ms:.0} ms",n.label));},Err(e)=>{current.internet=Some(false);current.ping_ms=None;return Ok(format!("{}: probe failed ({e}); this alone does not prove an internet outage",n.label));}}
         }
+        let enabling=matches!(&request,Request::Routing(true));
         let library_change=matches!(&request,Request::InitializeApps(_)|Request::AddApp(_)|Request::PinApp{..});
         let removal=matches!(&request,Request::RemoveApp(_));
         let old=self.state.config.clone();let mut next=old.clone();
@@ -144,9 +158,12 @@ impl Service {
             _=>bail!("Unsupported request"),
         }
         self.state.config=next;
-        if let Err(e)=if library_change{Ok(())}else{self.reconcile()}{self.state.config=old;if self.reconcile().is_err(){self.engine.clear()?;self.state.config.routing_enabled=false;let _=self.store.save(&self.state.config);}return Err(e);}
+        if let Err(e)=if library_change{Ok(())}else{self.reconcile()}{
+            if enabling{self.recover_routing(e)?;}
+            else{self.state.config=old;if let Err(restore)=self.reconcile(){self.recover_routing(restore)?;}return Err(e);}
+        }
         if let Err(e)=self.store.save(&self.state.config){
-            self.state.config=old;if self.reconcile().is_err(){self.engine.clear()?;self.state.engine_status="Storage failure; routing disabled".into();}
+            self.state.config=old;if let Err(restore)=self.reconcile(){self.recover_routing(restore)?;}
             return Err(e);
         }
         let monitor_available=self.state.process_monitor_available;let monitor_status=self.state.monitor_status.clone();
@@ -154,7 +171,7 @@ impl Service {
         self.state.process_monitor_available=monitor_available;self.state.monitor_status=monitor_status;
         if removal{return Ok("Removed from Out-Switch and all profiles. The installed app is unchanged.".into());}
         if library_change{return Ok("App library saved.".into());}
-        Ok(if self.state.config.routing_enabled{"Saved. New sockets use the new policy; existing sessions must reconnect."}else{"Saved locally. Routing is paused; the rule is not enforced."}.into())
+        Ok(if self.state.config.routing_enabled{"Saved. Active connections reconnect through the selected network on their next activity."}else{"Saved locally. Routing is paused; the rule is not enforced."}.into())
     }
     fn handle(&mut self,request:Request)->Response {
         let result=self.mutate(request);let (ok,message)=match result{Ok(m)=>(true,m),Err(e)=>(false,e.to_string())};
@@ -251,6 +268,23 @@ mod tests {
     fn service()->(Service,PathBuf){
         let path=std::env::temp_dir().join(format!("outswitch-service-test-{}-{}.db",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
         (Service::new(path.clone()).unwrap(),path)
+    }
+    #[test]
+    fn routing_failure_keeps_saved_intent_and_schedules_recovery(){
+        let (mut service,path)=service();service.store.save(&service.state.config).unwrap();
+        service.recover_routing("temporary capture failure").unwrap();
+        assert!(service.state.config.routing_enabled);assert!(service.store.load().unwrap().routing_enabled);
+        assert!(service.state.routing_recovering);assert!(service.retry_at.unwrap()>Instant::now());
+        service.reconcile().unwrap();assert!(!service.state.routing_recovering);assert!(service.retry_at.is_none());
+        service.mutate(Request::EmergencyStop).unwrap();assert!(!service.state.config.routing_enabled);assert!(service.retry_at.is_none());
+        drop(service);std::fs::remove_file(path).unwrap();
+    }
+    #[test]
+    fn startup_defaults_on_and_respects_startup_opt_out(){
+        let (mut service,path)=service();service.state.config.routing_enabled=false;service.store.save(&service.state.config).unwrap();drop(service);
+        let mut service=Service::new(path.clone()).unwrap();assert!(service.state.config.routing_enabled);
+        service.state.config.settings.network_control_on_start=false;service.state.config.routing_enabled=false;service.store.save(&service.state.config).unwrap();drop(service);
+        let service=Service::new(path.clone()).unwrap();assert!(!service.state.config.routing_enabled);drop(service);std::fs::remove_file(path).unwrap();
     }
     #[test]
     fn scanner_failure_keeps_saved_applications_and_routing_status(){

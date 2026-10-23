@@ -1,7 +1,7 @@
 1 ICON "OutSwitch.ico"
 1 VERSIONINFO
- FILEVERSION 0,6,0,0
- PRODUCTVERSION 0,6,0,0
+ FILEVERSION 0,6,1,0
+ PRODUCTVERSION 0,6,1,0
  FILEOS 0x40004
  FILETYPE 0x1
 BEGIN
@@ -11,9 +11,9 @@ BEGIN
   BEGIN
    VALUE "CompanyName", "HosseinSKR\0"
    VALUE "FileDescription", "Out-Switch\0"
-   VALUE "FileVersion", "0.6.0\0"
+   VALUE "FileVersion", "0.6.1\0"
    VALUE "ProductName", "Out-Switch\0"
-   VALUE "ProductVersion", "0.6.0\0"
+   VALUE "ProductVersion", "0.6.1\0"
    VALUE "LegalCopyright", "Copyright HosseinSKR. MIT License.\0"
   END
  END

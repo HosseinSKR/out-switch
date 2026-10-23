@@ -1491,7 +1491,7 @@ dependencies = [
 
 [[package]]
 name = "outswitch-common"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "serde",
@@ -1500,7 +1500,7 @@ dependencies = [
 
 [[package]]
 name = "outswitch-core"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "outswitch-common",
@@ -1508,7 +1508,7 @@ dependencies = [
 
 [[package]]
 name = "outswitch-ipc"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "outswitch-common",
@@ -1519,7 +1519,7 @@ dependencies = [
 
 [[package]]
 name = "outswitch-monitor"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "outswitch-common",
@@ -1528,7 +1528,7 @@ dependencies = [
 
 [[package]]
 name = "outswitch-network"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "outswitch-common",
@@ -1538,7 +1538,7 @@ dependencies = [
 
 [[package]]
 name = "outswitch-routing"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "outswitch-common",
@@ -1549,7 +1549,7 @@ dependencies = [
 
 [[package]]
 name = "outswitch-service"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "outswitch-common",
@@ -1566,7 +1566,7 @@ dependencies = [
 
 [[package]]
 name = "outswitch-storage"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "outswitch-common",
@@ -1576,7 +1576,7 @@ dependencies = [
 
 [[package]]
 name = "outswitch-ui"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "eframe",

@@ -2,7 +2,7 @@ use crate::{divert::{Address,Api,Driver},owner,packet::{self,Key,Packet},traffic
 use anyhow::{Result,Context,ensure};
 use outswitch_common::{identity,Rule};
 use socket2::{Domain,Protocol,Socket,Type};
-use std::{collections::BTreeMap,io::{Read,Write},net::{IpAddr,Ipv4Addr,Ipv6Addr,SocketAddr,TcpListener,TcpStream,UdpSocket,Shutdown},os::windows::io::AsRawSocket,sync::{Arc,Mutex,RwLock,mpsc::{self,SyncSender},atomic::{AtomicBool,Ordering}},thread::{self,JoinHandle},time::{Instant,Duration}};
+use std::{collections::{BTreeMap,BTreeSet},io::{Read,Write},net::{IpAddr,Ipv4Addr,Ipv6Addr,SocketAddr,TcpListener,TcpStream,UdpSocket,Shutdown},os::windows::io::AsRawSocket,sync::{Arc,Mutex,RwLock,mpsc::{self,SyncSender},atomic::{AtomicBool,Ordering}},thread::{self,JoinHandle},time::{Instant,Duration}};
 use windows_sys::Win32::Networking::WinSock::{setsockopt,IPPROTO_IP,IPPROTO_IPV6,IP_UNICAST_IF,IPV6_UNICAST_IF,SOCKET_ERROR};
 
 const MAX_FLOWS:usize=256;
@@ -12,12 +12,12 @@ pub struct Policy{pub rule:Rule,pub target:Option<Target>,pub blocked:bool}
 pub struct Target{pub id:String,pub index:u32,pub ipv6_index:u32,pub v4:Option<IpAddr>,pub v6:Option<IpAddr>}
 pub type Counters=BTreeMap<String,Arc<Traffic>>;
 struct Flow{
-    key:Key,synthetic:u16,original:Address,policy:Policy,traffic:Arc<Traffic>,closed:AtomicBool,
+    key:Key,executable:String,synthetic:u16,original:Address,policy:Policy,traffic:Arc<Traffic>,closed:AtomicBool,
     last:Mutex<Instant>,udp:Mutex<Option<SyncSender<Vec<u8>>>>,accepted:AtomicBool,created:Instant,reset:Mutex<Option<Vec<u8>>>,
 }
 impl Flow{fn count(&self,download:bool,bytes:usize){self.traffic.count(download,bytes);if let Some(target)=&self.policy.target{self.traffic.observed.lock().unwrap().insert(target.id.clone());}}}
 struct Tables{flows:BTreeMap<Key,Arc<Flow>>,reverse:BTreeMap<(bool,u16),Arc<Flow>>,upstreams:BTreeMap<Key,u8>,pass:BTreeMap<Key,Instant>,next:u16}
-struct Settings{policies:BTreeMap<String,Policy>,counters:Counters}
+struct Settings{policies:BTreeMap<String,Policy>,automatic:BTreeSet<String>,counters:Counters}
 struct Shared{
     stop:AtomicBool,driver:Arc<Driver>,settings:RwLock<Settings>,
     tables:Mutex<Tables>,error:Mutex<Option<String>>,workers:Mutex<Vec<JoinHandle<()>>>,ports:[u16;2],
@@ -40,13 +40,13 @@ fn listener(v4:bool)->Result<TcpListener>{
     s.bind(&SocketAddr::new(loopback(v4),0).into())?;s.listen(128)?;s.set_nonblocking(true)?;Ok(s.into())
 }
 impl Runtime{
-    pub fn start(policies:BTreeMap<String,Policy>,counters:Counters)->Result<Self>{
+    pub fn start(policies:BTreeMap<String,Policy>,automatic:BTreeSet<String>,counters:Counters)->Result<Self>{
         // All potentially failing setup occurs before capturing any user packets.
         for ip in ["192.0.2.1:1","[2001:db8::1]:1"]{for tcp in [true,false]{let endpoint:SocketAddr=ip.parse()?;owner::lookup(Key{local:endpoint,remote:endpoint,tcp})?;}}
         let v4=listener(true)?;let v6=listener(false)?;let ports=[v4.local_addr()?.port(),v6.local_addr()?.port()];
         let filter=format!("outbound and !impostor and (( !loopback and (tcp or udp)) or (loopback and tcp and (tcp.SrcPort == {} or tcp.SrcPort == {})))",ports[0],ports[1]);
         let api=Api::load()?;let driver=api.open(&filter)?;
-        let shared=Arc::new(Shared{stop:AtomicBool::new(false),driver,settings:RwLock::new(Settings{policies,counters}),tables:Mutex::new(Tables{flows:BTreeMap::new(),reverse:BTreeMap::new(),upstreams:BTreeMap::new(),pass:BTreeMap::new(),next:10000}),error:Mutex::new(None),workers:Mutex::new(vec![]),ports});
+        let shared=Arc::new(Shared{stop:AtomicBool::new(false),driver,settings:RwLock::new(Settings{policies,automatic,counters}),tables:Mutex::new(Tables{flows:BTreeMap::new(),reverse:BTreeMap::new(),upstreams:BTreeMap::new(),pass:BTreeMap::new(),next:10000}),error:Mutex::new(None),workers:Mutex::new(vec![]),ports});
         let mut runtime=Self{shared:shared.clone(),capture:None,listeners:vec![]};
         for (index,listener)in [v4,v6].into_iter().enumerate(){let s=shared.clone();runtime.listeners.push(thread::Builder::new().name("OutSwitch accept".into()).spawn(move||{
             while !s.stop.load(Ordering::Relaxed){match listener.accept(){
@@ -70,11 +70,11 @@ impl Runtime{
     }
     pub fn failure(&self)->Option<String>{if self.shared.stop.load(Ordering::Relaxed){Some(self.shared.error.lock().unwrap().clone().unwrap_or_else(||"Routing worker stopped".into()))}else{None}}
     pub fn notice(&self)->Option<String>{if self.shared.stop.load(Ordering::Relaxed){None}else{self.shared.error.lock().unwrap().take()}}
-    pub fn update(&self,policies:BTreeMap<String,Policy>,counters:Counters){
+    pub fn update(&self,policies:BTreeMap<String,Policy>,automatic:BTreeSet<String>,counters:Counters){
         let mut settings=self.shared.settings.write().unwrap();let mut tables=self.shared.tables.lock().unwrap();
-        for flow in tables.flows.values(){if policies.get(&identity(&flow.policy.rule.path))!=Some(&flow.policy){close_flow(&self.shared,flow);}}
+        for flow in tables.flows.values(){if policy_for(&flow.executable,&policies,&automatic).map(|(_,p)|p)!=Some(&flow.policy){close_flow(&self.shared,flow);}}
         // Rules can make a formerly automatic executable eligible immediately.
-        tables.pass.clear();*settings=Settings{policies,counters};
+        tables.pass.clear();*settings=Settings{policies,automatic,counters};
     }
 }
 fn close_flow(s:&Shared,flow:&Flow){
@@ -93,7 +93,10 @@ fn capture(s:&Arc<Shared>){
         let (n,mut address)=match s.driver.recv(&mut bytes){Ok(x)=>x,Err(e)=>{if !s.stop.load(Ordering::Relaxed){s.error(e);}break;}};
         let p=&mut bytes[..n];
         let result=process(s,p,&mut address);
-        if let Err(e)=result{s.error(e);break;}
+        // A disappearing endpoint, ambiguous shared UDP socket or failed packet
+        // injection affects this packet only. Never tear down every app's routes.
+        // Drop on failure: sending the original packet would bypass its policy.
+        if let Err(e)=result{s.error(format!("Packet skipped; routing remains active: {e}"));}
     }
 }
 fn process(s:&Arc<Shared>,p:&mut[u8],address:&mut Address)->Result<()>{
@@ -134,13 +137,22 @@ fn process(s:&Arc<Shared>,p:&mut[u8],address:&mut Address)->Result<()>{
         return s.inject(p,address);
     };
     let name=identity(&path);
-    let Some(policy)=settings.policies.get(&name)else{s.tables.lock().unwrap().pass.insert(key,Instant::now());return s.inject(p,address);};
+    let Some((counter_name,policy))=policy_for(&name,&settings.policies,&settings.automatic)else{s.tables.lock().unwrap().pass.insert(key,Instant::now());return s.inject(p,address);};
     if policy.blocked{return Ok(());}
     if policy.target.as_ref().is_some_and(|n|if v4{n.v4.is_none()}else{n.v6.is_none()}){
         if key.tcp{let mut reset=packet::tcp_reset(meta,p);let mut incoming=*address;incoming.inbound();s.inject(&mut reset,&mut incoming)?;}return Ok(());
     }
-    if key.tcp&&!meta.syn{return s.inject(p,address);} // Pre-existing TCP sessions need reconnection.
-    let traffic=settings.counters.get(&name).context("Missing application counter")?.clone();
+    if needs_reconnect(meta){
+        // An established Windows socket cannot be migrated to a different
+        // source address. Reset it so the app opens a new, relayed connection.
+        // Never let an assigned app continue on its previous network.
+        if p[meta.transport+13]&4==0{
+            let mut reset=packet::tcp_reset(meta,p);let mut incoming=*address;
+            incoming.inbound();s.inject(&mut reset,&mut incoming)?;
+        }
+        return Ok(());
+    }
+    let traffic=settings.counters.get(counter_name).context("Missing application counter")?.clone();
     let flow={let mut tables=s.tables.lock().unwrap();
         for f in tables.flows.values(){if f.key.tcp&&!f.accepted.load(Ordering::Relaxed)&&f.created.elapsed()>Duration::from_secs(30){f.closed.store(true,Ordering::Relaxed);}}
         let expired:Vec<_>=tables.flows.iter().filter(|(_,f)|f.closed.load(Ordering::Relaxed)&&f.last.lock().unwrap().elapsed()>Duration::from_secs(120)).map(|(k,_)|*k).collect();
@@ -148,7 +160,7 @@ fn process(s:&Arc<Shared>,p:&mut[u8],address:&mut Address)->Result<()>{
         tables.reverse.retain(|_,f|!f.closed.load(Ordering::Relaxed)||f.last.lock().unwrap().elapsed()<Duration::from_secs(120));
         if tables.flows.len()>=8192||tables.reverse.len()>=8192||tables.flows.values().filter(|f|!f.closed.load(Ordering::Relaxed)).count()>=MAX_FLOWS{return Ok(());}
         let synthetic=loop{tables.next=if tables.next==60000{10000}else{tables.next+1};if !tables.reverse.contains_key(&(v4,tables.next))&&tables.next!=port{break tables.next;}};
-        let flow=Arc::new(Flow{key,synthetic,original:*address,policy:policy.clone(),traffic,closed:AtomicBool::new(false),last:Mutex::new(Instant::now()),udp:Mutex::new(None),accepted:AtomicBool::new(false),created:Instant::now(),reset:Mutex::new(None)});
+        let flow=Arc::new(Flow{key,executable:name.clone(),synthetic,original:*address,policy:policy.clone(),traffic,closed:AtomicBool::new(false),last:Mutex::new(Instant::now()),udp:Mutex::new(None),accepted:AtomicBool::new(false),created:Instant::now(),reset:Mutex::new(None)});
         if key.tcp{tables.reverse.insert((v4,synthetic),flow.clone());}tables.flows.insert(key,flow.clone());flow
     };
     if !key.tcp{
@@ -167,6 +179,39 @@ fn redirect(s:&Shared,p:&mut[u8],address:&mut Address,meta:Packet,flow:&Flow)->R
         // A full bounded datagram queue drops packets, as a congested UDP link
         // would. It never stalls unrelated applications or grows without bound.
         if let Some(tx)=flow.udp.lock().unwrap().as_ref(){let _=tx.try_send(p[meta.payload..].to_vec());}Ok(())
+    }
+}
+fn needs_reconnect(meta:Packet)->bool{meta.key.tcp&&!meta.syn}
+fn policy_for<'a>(name:&str,policies:&'a BTreeMap<String,Policy>,automatic:&BTreeSet<String>)->Option<(&'a String,&'a Policy)>{
+    if let Some(entry)=policies.get_key_value(name){return Some(entry);}
+    if automatic.contains(name){return None;}
+    // Steam's store/chat browser uses a separate executable. Scope inheritance
+    // to its CEF helper folder, never Steam games or arbitrary child processes.
+    policies.iter().find(|(root,_)|steam_helper(root,name))
+}
+fn steam_helper(root:&str,name:&str)->bool{
+    let Some(folder)=root.strip_suffix(r"\steam.exe")else{return false;};
+    let Some(relative)=name.strip_prefix(&format!(r"{folder}\bin\cef\"))else{return false;};
+    relative.ends_with(r"\steamwebhelper.exe")&&!relative.split('\\').any(|p|p==".."||p==".")
+}
+#[cfg(test)]mod tests{
+    use super::*;
+    #[test]fn existing_tcp_reconnects_but_new_syn_and_udp_do_not(){
+        for (local,remote)in [("192.0.2.2:51000","1.1.1.1:443"),("[2001:db8::2]:51000","[2001:db8::3]:443")]{
+            let key=Key{local:local.parse().unwrap(),remote:remote.parse().unwrap(),tcp:true};
+            let mut packet=Packet{key,transport:20,payload:40,syn:false};assert!(needs_reconnect(packet));
+            packet.syn=true;assert!(!needs_reconnect(packet));packet.syn=false;packet.key.tcp=false;assert!(!needs_reconnect(packet));
+        }
+    }
+    #[test]fn steam_helper_inherits_but_games_and_explicit_overrides_do_not(){
+        let root=identity(r"C:\Program Files (x86)\Steam\steam.exe");
+        let helper=identity(r"C:\Program Files (x86)\Steam\bin\cef\cef.win7x64\steamwebhelper.exe");
+        let policy=Policy{rule:Rule::automatic(root.clone()),target:None,blocked:true};
+        let mut policies=BTreeMap::from([(root.clone(),policy.clone())]);let mut automatic=BTreeSet::new();
+        assert_eq!(policy_for(&helper,&policies,&automatic).unwrap().0,&root);
+        for other in [r"C:\Program Files (x86)\Steam\steamapps\common\Game\game.exe",r"C:\Other\Steam\bin\cef\v1\steamwebhelper.exe",r"C:\Program Files (x86)\Steam\bin\cef\..\other\steamwebhelper.exe"]{assert!(policy_for(&identity(other),&policies,&automatic).is_none());}
+        automatic.insert(helper.clone());assert!(policy_for(&helper,&policies,&automatic).is_none());
+        policies.insert(helper.clone(),policy);assert_eq!(policy_for(&helper,&policies,&automatic).unwrap().0,&helper);
     }
 }
 fn bound_socket(flow:&Flow)->Result<Socket>{
