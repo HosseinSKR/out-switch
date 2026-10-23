@@ -21,6 +21,21 @@ fn rate(bytes:f64)->String{if bytes>=1_000_000. {format!("{:.1} MB/s",bytes/1_00
 fn total(bytes:u64)->String{format!("{:.2} GB",bytes as f64/1_000_000_000.)}
 fn label(snapshot:&Snapshot,id:&str)->String{snapshot.config.network_names.get(id).cloned().unwrap_or_else(||"Unavailable adapter".into())}
 fn configured(snapshot:&Snapshot,rule:Option<&Rule>)->String{rule.and_then(|r|r.network.as_ref()).map(|id|label(snapshot,id)).unwrap_or_else(||"Automatic".into())}
+fn appearance_controls(ui:&mut egui::Ui,settings:&mut Settings){
+    ui.strong("APPEARANCE");
+    ui.horizontal_wrapped(|ui|{ui.label("Theme");ui.selectable_value(&mut settings.light,false,"Dark");ui.selectable_value(&mut settings.light,true,"Light");});
+    ui.label("Accent color");ui.horizontal_wrapped(|ui|{
+        for (name,color) in [("Sky",[63,179,235]),("Mint",[65,199,159]),("Violet",[164,140,235]),("Amber",[232,175,77])]{
+            if ui.selectable_label(settings.accent==color,RichText::new(name).color(Color32::from_rgb(color[0],color[1],color[2]))).clicked(){settings.accent=color;}
+        }ui.color_edit_button_srgb(&mut settings.accent);
+    });
+}
+fn monitoring_controls(ui:&mut egui::Ui,settings:&mut Settings,secondary:Color32){
+    ui.strong("MONITORING");ui.checkbox(&mut settings.show_system,"Include Windows system apps");
+    ui.label(RichText::new("Include system processes in the application list.").size(12.).color(secondary));
+    ui.checkbox(&mut settings.collect_statistics,"Save network usage history");
+    ui.label(RichText::new("Keep 90 days of totals on this PC. Live traffic always stays available.").size(12.).color(secondary));
+}
 enum Update{State(Snapshot),Message(String)}
 fn start_local_helper()->anyhow::Result<std::process::Child> {
     use std::os::windows::process::CommandExt;
@@ -256,30 +271,21 @@ impl App {
     fn settings(&mut self,ui:&mut egui::Ui){
         self.card().show(ui,|ui|{ui.set_min_width(ui.available_width());self.updater.ui(ui);});ui.add_space(20.);
         let mut settings=self.settings_draft.clone().unwrap_or_else(||self.state.config.settings.clone());
+        let secondary=Color32::from_gray(if self.state.config.settings.light{85}else{165});
         self.card().show(ui,|ui|{ui.set_min_width(ui.available_width());
             ui.label(RichText::new("Appearance & monitoring").size(20.).strong());
-            ui.label(RichText::new("Make Out-Switch feel at home on your desktop.").weak());ui.add_space(10.);
-            ui.strong("APPEARANCE");
-            ui.horizontal_wrapped(|ui|{ui.label("Theme");ui.selectable_value(&mut settings.light,false,"Dark");ui.selectable_value(&mut settings.light,true,"Light");});
-            ui.horizontal_wrapped(|ui|{ui.label("Accent color");
-                for (name,color) in [("Sky",[63,179,235]),("Mint",[65,199,159]),("Violet",[164,140,235]),("Amber",[232,175,77])]{
-                    if ui.selectable_label(settings.accent==color,RichText::new(name).color(Color32::from_rgb(color[0],color[1],color[2]))).clicked(){settings.accent=color;}
-                }ui.color_edit_button_srgb(&mut settings.accent);
-            });
-            ui.add_space(8.);ui.separator();ui.add_space(8.);ui.strong("MONITORING");
-            ui.checkbox(&mut settings.show_system,"Include Windows system apps");
-            ui.label(RichText::new("Show system processes alongside your apps in the application list.").small().weak());
-            ui.checkbox(&mut settings.collect_statistics,"Save network usage history");
-            ui.label(RichText::new("Keep up to 90 days of adapter totals on this PC. Live traffic stays available when off.").small().weak());
+            ui.label(RichText::new("Your desktop, your preferences.").color(secondary));ui.add_space(12.);
+            if ui.available_width()>=680.{ui.columns(2,|columns|{appearance_controls(&mut columns[0],&mut settings);monitoring_controls(&mut columns[1],&mut settings,secondary);});}
+            else{appearance_controls(ui,&mut settings);ui.add_space(12.);monitoring_controls(ui,&mut settings,secondary);}
             ui.add_space(8.);ui.separator();ui.add_space(8.);ui.strong("STARTUP");
             ui.checkbox(&mut settings.network_control_on_start,"Start with Network Control ON");
-            ui.label(RichText::new("Apply saved routes when the background service starts. Temporary errors retry automatically.").small().weak());
+            ui.label(RichText::new("Apply saved routes when the service starts. Temporary errors retry automatically.").size(12.).color(secondary));
             ui.add_space(12.);let changed=settings!=self.state.config.settings;
             ui.horizontal_wrapped(|ui|{
                 if ui.add_enabled(self.state.service_connected&&changed,egui::Button::new("Apply changes").min_size(Vec2::new(125.,32.))).clicked(){self.send(Request::Settings(settings.clone()));self.settings_draft=None;}
                 else{self.settings_draft=Some(settings.clone());}
                 if ui.add_enabled(changed,egui::Button::new("Discard").min_size(Vec2::new(80.,32.))).clicked(){self.settings_draft=None;}
-                ui.label(RichText::new(if changed{"Unsaved changes"}else{"All changes saved"}).small().weak());
+                ui.label(RichText::new(if changed{"Unsaved changes"}else{"All changes saved"}).size(12.).color(secondary));
             });
         });ui.add_space(20.);
         self.card().show(ui,|ui|{ui.set_min_width(ui.available_width());ui.label(RichText::new("Gaming QoS").size(20.));let mut gaming=self.state.config.gaming_mode;if ui.add_enabled(self.state.service_connected,egui::Checkbox::new(&mut gaming,"Use gaming priority markings")).changed(){self.send(Request::Gaming(gaming));}ui.label("Marks games as Critical, Discord as High, launchers as Low and OneDrive as Background. Applies to apps with a selected network; routes stay the same. Router support is required for prioritization.");});ui.add_space(20.);

@@ -11,7 +11,25 @@ $packages=@(
 foreach($package in $packages){
     $archive=Join-Path $stage $package.Name
     if($ArchiveDirectory){Copy-Item -LiteralPath (Join-Path $ArchiveDirectory $package.Name) -Destination $archive -Force}
-    elseif(!(Test-Path -LiteralPath $archive)){Invoke-WebRequest -Uri ('https://reqrypt.org/download/'+$package.Name) -OutFile $archive}
+    elseif(!(Test-Path -LiteralPath $archive)){
+        $bundled=Join-Path $destinationPath ('licenses\WinDivert-2.2.2\'+$package.Name)
+        if(Test-Path -LiteralPath $bundled){Copy-Item -LiteralPath $bundled -Destination $archive}
+        else{
+            $urls=@('https://reqrypt.org/download/'+$package.Name)
+            if($package.Name -eq 'WinDivert-2.2.2-A.zip'){$urls=@('https://github.com/basil00/WinDivert/releases/download/v2.2.2/WinDivert-2.2.2-A.zip')+$urls}
+            $downloaded=$false;$partial=$archive+'.partial'
+            foreach($url in $urls){
+                try{
+                    Invoke-WebRequest -Uri $url -OutFile $partial -TimeoutSec 60
+                    if((Get-FileHash -LiteralPath $partial -Algorithm SHA256).Hash -ne $package.Hash){throw 'Downloaded archive checksum mismatch'}
+                    Move-Item -LiteralPath $partial -Destination $archive -Force
+                    $downloaded=$true;break
+                }catch{Write-Warning "Could not retrieve pinned $($package.Name) from ${url}: $_"}
+                finally{if(Test-Path -LiteralPath $partial){Remove-Item -LiteralPath $partial -Force}}
+            }
+            if(!$downloaded){throw "Could not download verified archive: $($package.Name)"}
+        }
+    }
     if((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $package.Hash){throw "Official archive hash mismatch: $($package.Name)"}
 }
 Expand-Archive -LiteralPath (Join-Path $stage 'WinDivert-2.2.2-A.zip') -DestinationPath $stage -Force
