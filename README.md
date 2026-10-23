@@ -2,19 +2,19 @@
 
 <p><img src="assets/OutSwitch.png" width="96" alt="Out-Switch icon"></p>
 
-[Download the Windows installer](https://github.com/HosseinSKR/out-switch/releases/tag/v0.6.0)
+[Download the Windows installer](https://github.com/HosseinSKR/out-switch/releases/tag/v0.6.1)
 
 This update fixes existing connections bypassing newly assigned routes and errors
 silently turning Network Control OFF. Steam's web helper follows Steam's selected
 network. Settings now separates appearance, monitoring and startup preferences.
-The last published release is linked above; 0.6.1 validation is in progress.
+The Windows tests include real TCP reconnection and TCP/UDP replies through the selected adapter.
 
 Native desktop app by **HosseinSKR**. Assign an internet adapter to an executable,
 set shared upload/download limits, and monitor the relayed traffic locally.
 
-**This build contains a new TCP/UDP relay and a signed WinDivert driver. Live routing
-has not yet been verified: Windows denied driver loading in the build environment.
-It is a test build, not a certified finished release.** See [validation](docs/VALIDATION.md).
+**The Windows CI smoke test passed real TCP reconnection and TCP/UDP forwarding,
+plus installation and service recovery. Two-adapter hardware isolation, IPv6 and
+sustained bandwidth accuracy still need validation. This remains a preview.** See [validation](docs/VALIDATION.md).
 
 ## Install and use
 
@@ -61,7 +61,7 @@ Failure is reported, never turned into a simulated pass. Test details are in
 ## Scope and outstanding checks
 
 Two-network isolation, live IPv6, sustained rate accuracy, games/anti-cheat, VPNs,
-sleep/resume, and MSI install/upgrade/repair/uninstall remain unverified.
+sleep/resume, and MSI upgrade/repair remain unverified. Clean install/uninstall passed on hosted Windows.
 Raw fragments, IPsec, unknown/protected executable ownership, system-resolved DNS,
 local/broadcast/multicast traffic are outside relay coverage. Existing TCP sessions belonging
 to assigned apps are reset so the app can reconnect through the relay.
@@ -89,7 +89,7 @@ The driver preparation script downloads official archives, verifies pinned SHA-2
 hashes and Authenticode, and includes the matching library source and license.
 The retired custom driver under `driver/` and `legacy_wfp.rs` are historical source
 only; they are neither built nor installed. The prepared GitHub workflow creates
-test artifacts only. **Nothing has been published.**
+test artifacts only. Download packages are published separately on the [release page](https://github.com/HosseinSKR/out-switch/releases).
 
 [Architecture](docs/ARCHITECTURE.md) · [Validation](docs/VALIDATION.md) · [Release checks](docs/RELEASE.md)
 

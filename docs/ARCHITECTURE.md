@@ -1,4 +1,4 @@
-# 0.4 routing architecture
+# 0.6.1 routing architecture
 
 The normal desktop communicates with an owner/SYSTEM/administrator-authorized named
 pipe. The installed LocalSystem service owns configuration and routing. Both native
@@ -48,7 +48,7 @@ Updates replace the policy map under a write lock and close/reset only affected
 relays. Unchanged app sessions stay open. Topology changes use the same mechanism.
 Stopping closes relay sockets, shuts down capture and releases WinDivert handles.
 No unrelated WinDivert service is stopped/deleted: other software may share the driver.
-Normal relay failures affect that connection; capture failure disables routing.
+Normal relay failures affect that connection. Individual packet failures are dropped and reported without stopping capture. Fatal capture failures close filters and retry with backoff; they never overwrite the saved Network Control choice. The dashboard shows recovery separately from the ON/OFF preference.
 
 Resource bounds: 256 active flows, 8 queued UDP datagrams per flow, 8,192 retained
 flow/reverse records, bounded TCP buffers, 120-second UDP idle timeout and 600-second
@@ -56,11 +56,11 @@ TCP idle timeout. Closed synthetic mappings linger briefly for late TCP packets.
 
 ## Explicit limitations
 
-Live integration has not passed in the build environment. Fragmented raw packets,
+The hosted one-adapter TCP/UDP integration test passed; two-adapter isolation remains unverified. Fragmented raw packets,
 unsupported IPv6 extension chains/IPsec, unknown ownership, local discovery, Windows
-DNS Client service traffic and pre-existing TCP sessions are outside this relay.
+DNS Client service traffic are outside this relay. Established TCP sessions for assigned apps are reset on their next outbound packet so the app reconnects through the relay.
 Failover is for reconnection, not migration of an established TCP session. App families
-with multiple executables require separate rules. No absolute leak-prevention promise.
+with multiple executables generally require separate rules. Steam CEF web helpers under its own bin/cef folder inherit the Steam rule unless an explicit helper rule overrides it; Steam games never inherit this rule. No absolute leak-prevention promise.
 
 Primary references: [WinDivert API](https://reqrypt.org/windivert-doc.html),
 [IPv4 interface option](https://learn.microsoft.com/en-us/windows/win32/winsock/ipproto-ip-socket-options),

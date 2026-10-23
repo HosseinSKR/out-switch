@@ -283,7 +283,7 @@ impl App {
             ui.add_space(12.);let changed=settings!=self.state.config.settings;
             ui.horizontal_wrapped(|ui|{
                 if ui.add_enabled(self.state.service_connected&&changed,egui::Button::new("Apply changes").min_size(Vec2::new(125.,32.))).clicked(){self.send(Request::Settings(settings.clone()));self.settings_draft=None;}
-                else{self.settings_draft=Some(settings.clone());}
+                else{self.settings_draft=changed.then(||settings.clone());}
                 if ui.add_enabled(changed,egui::Button::new("Discard").min_size(Vec2::new(80.,32.))).clicked(){self.settings_draft=None;}
                 ui.label(RichText::new(if changed{"Unsaved changes"}else{"All changes saved"}).size(12.).color(secondary));
             });
