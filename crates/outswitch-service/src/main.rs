@@ -266,8 +266,18 @@ fn main()->Result<()> {
 mod tests {
     use super::*;
     fn service()->(Service,PathBuf){
-        let path=std::env::temp_dir().join(format!("outswitch-service-test-{}-{}.db",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        static NEXT:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(0);
+        let path=std::env::temp_dir().join(format!("outswitch-service-test-{}-{}-{}.db",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),NEXT.fetch_add(1,Ordering::Relaxed)));
         (Service::new(path.clone()).unwrap(),path)
+    }
+    fn cleanup(path:PathBuf){
+        // Windows scanners can retain a short-lived handle after SQLite closes.
+        // Only retry sharing/lock violations; never hide a real cleanup failure.
+        for attempt in 0..20{match std::fs::remove_file(&path){
+            Ok(())=>return,
+            Err(e)if matches!(e.raw_os_error(),Some(32|33))&&attempt<19=>std::thread::sleep(Duration::from_millis(50)),
+            Err(e)=>panic!("Could not remove test database: {e}"),
+        }}
     }
     #[test]
     fn routing_failure_keeps_saved_intent_and_schedules_recovery(){
@@ -277,14 +287,14 @@ mod tests {
         assert!(service.state.routing_recovering);assert!(service.retry_at.unwrap()>Instant::now());
         service.reconcile().unwrap();assert!(!service.state.routing_recovering);assert!(service.retry_at.is_none());
         service.mutate(Request::EmergencyStop).unwrap();assert!(!service.state.config.routing_enabled);assert!(service.retry_at.is_none());
-        drop(service);std::fs::remove_file(path).unwrap();
+        drop(service);cleanup(path);
     }
     #[test]
     fn startup_defaults_on_and_respects_startup_opt_out(){
         let (mut service,path)=service();service.state.config.routing_enabled=false;service.store.save(&service.state.config).unwrap();drop(service);
         let mut service=Service::new(path.clone()).unwrap();assert!(service.state.config.routing_enabled);
         service.state.config.settings.network_control_on_start=false;service.state.config.routing_enabled=false;service.store.save(&service.state.config).unwrap();drop(service);
-        let service=Service::new(path.clone()).unwrap();assert!(!service.state.config.routing_enabled);drop(service);std::fs::remove_file(path).unwrap();
+        let service=Service::new(path.clone()).unwrap();assert!(!service.state.config.routing_enabled);drop(service);cleanup(path);
     }
     #[test]
     fn scanner_failure_keeps_saved_applications_and_routing_status(){
@@ -299,7 +309,7 @@ mod tests {
         assert_eq!(service.state.applications[0].path,rule.path);
         assert_eq!(service.state.engine_status,routing_status);
         assert!(service.state.applications[0].download_bps.is_none());
-        drop(service);std::fs::remove_file(path).unwrap();
+        drop(service);cleanup(path);
     }
     #[test]
     fn scanner_recovers_without_duplicate_saved_applications(){
@@ -312,7 +322,7 @@ mod tests {
         assert!(service.state.monitor_status.is_empty());
         assert_eq!(service.state.applications.len(),1);
         assert_eq!(service.state.applications[0].pids,vec![42]);
-        drop(service);std::fs::remove_file(path).unwrap();
+        drop(service);cleanup(path);
     }
     #[test]
     fn library_actions_persist_and_removed_running_apps_stay_removed() {
@@ -333,7 +343,7 @@ mod tests {
         drop(service);let mut service=Service::new(path.clone()).unwrap();
         assert!(service.state.config.apps_initialized);assert!(service.state.config.apps.is_empty());assert!(service.state.config.pinned_apps.is_empty());
         service.mutate(Request::AddApp(app)).unwrap();assert_eq!(service.state.applications.len(),1);
-        drop(service);std::fs::remove_file(path).unwrap();
+        drop(service);cleanup(path);
     }
 }
 
