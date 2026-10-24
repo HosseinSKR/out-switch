@@ -1,0 +1,121 @@
+MethodInvocationException: 
+Line |
+   4 |  … Select-Object -Skip $start | ForEach-Object {$_.Substring(10)}) -join …
+     |                                                 ~~~~~~~~~~~~~~~~
+     | Exception calling "Substring" with "1" argument(s): "startIndex cannot be larger than length of string. (Parameter 'startIndex')"
+MethodInvocationException: 
+Line |
+   4 |  … Select-Object -Skip $start | ForEach-Object {$_.Substring(10)}) -join …
+     |                                                 ~~~~~~~~~~~~~~~~
+     | Exception calling "Substring" with "1" argument(s): "startIndex cannot be larger than length of string. (Parameter 'startIndex')"
+MethodInvocationException: 
+Line |
+   4 |  … Select-Object -Skip $start | ForEach-Object {$_.Substring(10)}) -join …
+     |                                                 ~~~~~~~~~~~~~~~~
+     | Exception calling "Substring" with "1" argument(s): "startIndex cannot be larger than length of string. (Parameter 'startIndex')"
+name: Upload validated 0.6.1 preview
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  upload:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: HosseinSKR/out-switch
+      SOURCE_SHA: 366a686d946929d2953fb7af8efcfa7556e9acb2
+      VALIDATED_RUN: '40071708869'
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: 366a686d946929d2953fb7af8efcfa7556e9acb2
+          persist-credentials: false
+      - name: Package the exact validated installer and upload to the draft
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Invoke-Gh {
+            & gh @args
+            if ($LASTEXITCODE -ne 0) { throw 'GitHub command failed' }
+          }
+          $run = (Invoke-Gh api "repos/$env:GH_REPO/actions/runs/$env:VALIDATED_RUN") | ConvertFrom-Json
+          if ($run.conclusion -ne 'success' -or $run.head_sha -ne $env:SOURCE_SHA) { throw 'Source does not match a successful validation run' }
+          $release = (Invoke-Gh release view v0.6.1 --json isDraft) | ConvertFrom-Json
+          if (!$release.isDraft) { throw 'Only an unpublished draft may be updated by this workflow' }
+          Invoke-Gh run download $env:VALIDATED_RUN -n Out-Switch-preview-x64 -D "$env:RUNNER_TEMP/validated-artifact"
+          $msis = @(Get-ChildItem -LiteralPath "$env:RUNNER_TEMP/validated-artifact" -Recurse -Filter Out-Switch-0.6.1-x64.msi)
+          if ($msis.Count -ne 1) { throw 'Expected exactly one validated installer' }
+          $output = Join-Path $env:RUNNER_TEMP 'release-upload'
+          $extract = Join-Path $env:RUNNER_TEMP 'validated-extract'
+          New-Item -ItemType Directory -Force $output,$extract | Out-Null
+          $msi = Join-Path $output 'Out-Switch-0.6.1-x64.msi'
+          Copy-Item -LiteralPath $msis[0].FullName -Destination $msi
+          $process = Start-Process msiexec.exe -ArgumentList @('/a',('"'+$msi+'"'),'/qn',('TARGETDIR="'+$extract+'"')) -WindowStyle Hidden -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw 'Administrative installer extraction failed' }
+          $executables = @(Get-ChildItem -LiteralPath $extract -Recurse -Filter OutSwitch.exe)
+          if ($executables.Count -ne 1) { throw 'Expected one desktop executable in installer payload' }
+          $bundle = Join-Path $env:RUNNER_TEMP 'release-bundle'
+          $app = Join-Path $bundle 'Application'
+          New-Item -ItemType Directory -Force $bundle | Out-Null
+          Copy-Item -LiteralPath $executables[0].Directory.FullName -Destination $app -Recurse
+          foreach ($name in @('OutSwitch.exe','OutSwitchService.exe','WinDivert.dll','WinDivert64.sys')) {
+            if (!(Test-Path -LiteralPath (Join-Path $app $name))) { throw "Missing payload: $name" }
+          }
+          foreach ($name in @('docs','assets')) { Copy-Item -LiteralPath $name -Destination $app -Recurse -Force }
+          Copy-Item README.md,CHANGELOG.md,LICENSE,THIRD_PARTY_NOTICES.md -Destination $app -Force
+          New-Item -ItemType Directory -Force "$bundle/scripts" | Out-Null
+          Copy-Item scripts/Test-LiveRouting.ps1 "$bundle/scripts/"
+          $receipt = @{
+            version='0.6.1'; github_source_commit=$env:SOURCE_SHA; compiler='MSVC';
+            hosted_ci_status='passed'; hosted_tests_passed=38;
+            hosted_ci_url=$run.html_url; live_tcp_udp_reconnect_verified=$true;
+            hosted_driver_load_verified=$true; hosted_installer_ice_validation_passed=$true;
+            hosted_install_uninstall_verified=$true; hosted_service_crash_recovery_verified=$true;
+            two_adapter_isolation_verified=$false;
+            package_note='Exact installer from the successful Windows validation run; application files extracted from that installer.'
+          }
+          $receipt | ConvertTo-Json | Set-Content "$app/BUILD-STATUS.json" -Encoding utf8
+          @'
+          OUT-SWITCH 0.6.1 PREVIEW
+
+          Close the old desktop app and run Out-Switch-0.6.1-x64.msi.
+          Network Control starts ON by default; Settings has a startup opt-out.
+          Connect both networks and select Net 2 explicitly for each intended app.
+          Automatic follows Windows. Reopen apps that do not reconnect themselves.
+          Existing sessions may be interrupted when a network assignment changes.
+          App cards show Relay: Net 2 once traffic passes through that adapter.
+          Temporary errors no longer persist OFF; fatal errors retry automatically.
+          Windows networking may operate during recovery; this is not leak prevention.
+
+          All 38 Windows tests, live TCP reset/TCP/UDP, installer validation, clean
+          installation, service crash recovery, driver loading and uninstall passed.
+          Your exact Ethernet/Wi-Fi combination, IPv6, VPNs, games, sustained rate
+          limits and MSI upgrade/repair still need testing. See docs/VALIDATION.md.
+          BUILD-STATUS.json identifies the validated source and Windows CI run.
+
+          Windows 10 2004+ / Windows 11 Intel/AMD x64. No separate runtime required.
+          The included driver is signed. The app and installer are not publisher-signed.
+          Matching driver source and licenses are included in Application/licenses.
+          The Application folder supports portable monitoring; routing uses the installed service.
+          '@ | Set-Content "$bundle/START-HERE.txt" -Encoding utf8
+          $sourceZip = Join-Path $output 'Out-Switch-0.6.1-source.zip'
+          & git archive --format=zip --prefix=out-switch/ -o $sourceZip HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Source archive failed' }
+          Copy-Item -LiteralPath $msi,$sourceZip -Destination $bundle
+          $bundleZip = Join-Path $output 'Out-Switch-0.6.1-test-bundle.zip'
+          Compress-Archive -Path "$bundle/*" -DestinationPath $bundleZip
+          $checksums = Join-Path $output 'Out-Switch-0.6.1-SHA256SUMS.txt'
+          @($msi,$sourceZip,$bundleZip) | ForEach-Object {
+            (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant()+'  '+[IO.Path]::GetFileName($_)
+          } | Set-Content -LiteralPath $checksums -Encoding utf8
+          Invoke-Gh release edit v0.6.1 --target $env:SOURCE_SHA
+          Invoke-Gh release upload v0.6.1 $msi $sourceZip $bundleZip $checksums --clobber
+          Write-Host 'Validated files uploaded to the draft. This workflow does not publish releases.'
