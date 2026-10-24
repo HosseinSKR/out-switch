@@ -1,18 +1,3 @@
-MethodInvocationException: 
-Line |
-   4 |  … Select-Object -Skip $start | ForEach-Object {$_.Substring(10)}) -join …
-     |                                                 ~~~~~~~~~~~~~~~~
-     | Exception calling "Substring" with "1" argument(s): "startIndex cannot be larger than length of string. (Parameter 'startIndex')"
-MethodInvocationException: 
-Line |
-   4 |  … Select-Object -Skip $start | ForEach-Object {$_.Substring(10)}) -join …
-     |                                                 ~~~~~~~~~~~~~~~~
-     | Exception calling "Substring" with "1" argument(s): "startIndex cannot be larger than length of string. (Parameter 'startIndex')"
-MethodInvocationException: 
-Line |
-   4 |  … Select-Object -Skip $start | ForEach-Object {$_.Substring(10)}) -join …
-     |                                                 ~~~~~~~~~~~~~~~~
-     | Exception calling "Substring" with "1" argument(s): "startIndex cannot be larger than length of string. (Parameter 'startIndex')"
 name: Upload validated 0.6.1 preview
 
 on:
